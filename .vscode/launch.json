@@ -1,0 +1,248 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug",
+      "cargo": {
+        "args": ["test", "--no-run", "--lib"],
+        "filter": {
+          "name": "ripht-php-sapi",
+          "kind": "lib"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Tests (single thread)",
+      "cargo": {
+        "args": ["test", "--no-run", "--lib"],
+        "filter": {
+          "name": "ripht-php-sapi",
+          "kind": "lib"
+        }
+      },
+      "args": ["--test-threads=1", "--nocapture"],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "RUST_BACKTRACE": "1"
+      }
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "All tests",
+      "cargo": {
+        "args": ["test", "--no-run"],
+        "filter": {
+          "name": "ripht-php-sapi",
+          "kind": "lib"
+        }
+      },
+      "args": ["--test-threads=1", "--nocapture"],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "RUST_BACKTRACE": "1"
+      }
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Specific test",
+      "cargo": {
+        "args": ["test", "--lib", "--no-run"],
+        "filter": {
+          "name": "ripht-php-sapi",
+          "kind": "lib"
+        }
+      },
+      "args": ["${input:testName}", "--exact", "--test-threads=1", "--nocapture"],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "RUST_BACKTRACE": "1"
+      }
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Integration test",
+      "cargo": {
+        "args": ["test", "--test", "${input:integrationTestFile}", "--no-run"],
+        "filter": {
+          "kind": "test"
+        }
+      },
+      "args": ["${input:testName}", "--exact", "--test-threads=1", "--nocapture"],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "RUST_BACKTRACE": "1"
+      }
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Module tests",
+      "cargo": {
+        "args": ["test", "--no-run", "--lib"],
+        "filter": {
+          "name": "ripht-php-sapi",
+          "kind": "lib"
+        }
+      },
+      "args": ["${input:moduleName}", "--test-threads=1", "--nocapture"],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "RUST_BACKTRACE": "1"
+      }
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Example",
+      "cargo": {
+        "args": ["build", "--example", "${input:exampleName}"],
+        "filter": {
+          "name": "${input:exampleName}",
+          "kind": "example"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Run example",
+      "cargo": {
+        "args": ["run", "--example", "${input:exampleName}"],
+        "filter": {
+          "name": "${input:exampleName}",
+          "kind": "example"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Nextest",
+      "cargo": {
+        "args": ["nextest", "run", "--no-run"],
+        "filter": {
+          "name": "ripht-php-sapi",
+          "kind": "lib"
+        }
+      },
+      "args": ["--no-capture"],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "RUST_BACKTRACE": "1"
+      }
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Nextest single",
+      "cargo": {
+        "args": ["nextest", "run", "--no-run"],
+        "filter": {
+          "name": "ripht-php-sapi",
+          "kind": "lib"
+        }
+      },
+      "args": ["${input:testName}", "--exact", "--no-capture"],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "RUST_BACKTRACE": "1"
+      }
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Integration tests",
+      "cargo": {
+        "args": ["test", "--no-run", "--test", "${input:integrationTestFile}"],
+        "filter": {
+          "name": "${input:integrationTestFile}",
+          "kind": "test"
+        }
+      },
+      "args": ["--test-threads=1", "--nocapture"],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "RUST_BACKTRACE": "1"
+      }
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Benchmarks",
+      "cargo": {
+        "args": ["bench", "--no-run"],
+        "filter": {
+          "kind": "bench"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "testName",
+      "type": "promptString",
+      "description": "Enter the exact test name (e.g., sapi::ffi::tests::test_get_context_null)",
+      "default": ""
+    },
+    {
+      "id": "integrationTestFile",
+      "type": "pickString",
+      "description": "Select an integration test file",
+      "options": [
+        "callbacks",
+        "sapi"
+      ]
+    },
+    {
+      "id": "moduleName",
+      "type": "pickString",
+      "description": "Select a module to test",
+      "options": [
+        "sapi",
+        "sapi::ffi",
+        "sapi::callbacks",
+        "sapi::server_context",
+        "execution",
+        "execution::executor",
+        "execution::context",
+        "adapters",
+        "adapters::web",
+        "adapters::cli"
+      ]
+    },
+    {
+      "id": "exampleName",
+      "type": "pickString",
+      "description": "Select an example to run/debug",
+      "options": [
+        "basic_execution",
+        "error_handling",
+        "exception_recovery",
+        "file_io",
+        "file_upload",
+        "http_server",
+        "memory_pressure",
+        "post_form",
+        "post_json",
+        "session_handling",
+        "streaming_output",
+        "encoding_guanlet"
+      ]
+    }
+  ]
+}

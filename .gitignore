@@ -1,0 +1,8 @@
+docs/
+CLAUDE.md
+.claude
+SAFETY.md
+target/
+.cargo/config.toml
+.cursor
+.refs/

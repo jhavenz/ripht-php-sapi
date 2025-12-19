@@ -1,0 +1,42 @@
+
+[env]
+#### Benchmarking 
+
+# /path/to/php-fpm (for BENCH_COMPARE)
+#BENCH_FPM_BIN=
+
+# /path/to/frankenphp
+#BENCH_FRANKENPHP_BIN=
+
+# "1" to enable external server comparisons
+#BENCH_COMPARE=
+
+# "1" to benchmark only php-fpm
+#BENCH_FPM_ONLY=
+
+# "1" to benchmark only FrankenPHP
+#BENCH_FRANKENPHP_ONLY=
+
+# Number of worker processes for pooled benches (default: 4)
+#BENCH_WORKERS=
+
+#### Runtime tuning (optional)
+
+# initial output buffer (bytes)
+SAPI_INIT_BUF = "65536"     
+
+# x4 (default), x2, fixed32k
+SAPI_BUF_GROWTH = "x4"      
+
+#### Build/dev overrides (used by build.rs)
+# NOTE: Some variables (e.g., OUT_DIR, CARGO_*, etc.) are set by Cargo at build time
+# and are not included here.
+
+# Path to PHP build root containing lib/libphp.a (REQUIRED)
+# Set this to your PHP installation, or install to ~/.ripht/php, ~/.local/php, or /usr/local
+RIPHT_PHP_SAPI_PREFIX = "/path/to/php"
+
+#### Testing
+
+# We're using the non-ZTS build of PHP, the tests must be run serially
+RUST_TEST_THREADS = "1"
