@@ -1,8 +1,17 @@
+//! CLI request builder for command-line style execution.
+//!
+//! Provides minimal `$_SERVER` variables (no HTTP context). Use for
+//! scripts that expect CLI-style invocation.
+
 use std::path::{Path, PathBuf};
 
 use crate::execution::ExecutionContext;
 use crate::sapi::ServerVars;
 
+#[cfg(feature = "tracing")]
+use tracing::debug;
+
+/// Errors from building a CLI request.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum CliRequestError {
@@ -21,13 +30,35 @@ impl std::fmt::Display for CliRequestError {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+/// Builder for CLI-style PHP requests.
+///
+/// Configure arguments, stdin, environment, and INI overrides.
+#[derive(Debug, Clone)]
 pub struct CliRequest {
     stdin: Vec<u8>,
     argv: Vec<String>,
     working_dir: Option<PathBuf>,
     env_vars: Vec<(String, String)>,
     ini_overrides: Vec<(String, String)>,
+}
+
+impl Default for CliRequest {
+    fn default() -> Self {
+        Self {
+            stdin: Default::default(),
+            argv: Default::default(),
+            working_dir: Default::default(),
+            env_vars: Default::default(),
+            ini_overrides: vec![
+                ("html_errors".to_string(), "0".to_string()),
+                ("display_errors".to_string(), "1".to_string()),
+                ("implicit_flush".to_string(), "1".to_string()),
+                ("max_input_time".to_string(), "-1".to_string()),
+                ("output_buffering".to_string(), "0".to_string()),
+                ("max_execution_time".to_string(), "0".to_string()),
+            ],
+        }
+    }
 }
 
 impl CliRequest {
@@ -128,6 +159,13 @@ impl CliRequest {
             .as_ref()
             .to_path_buf();
 
+        #[cfg(feature = "tracing")]
+        debug!(
+            script_path = %script_path.display(),
+            args = ?self.argv,
+            "Building CLI request"
+        );
+
         if !script_path.exists() {
             return Err(CliRequestError::ScriptNotFound(script_path));
         }
@@ -168,6 +206,64 @@ impl CliRequest {
             input: self.stdin,
             env_vars: self.env_vars,
             ini_overrides: self.ini_overrides,
+            log_to_stderr: true,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn php_script_path(name: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/php_scripts")
+            .join(name)
+    }
+
+    #[test]
+    fn test_cli_request_sets_log_to_stderr() {
+        let script_path = php_script_path("hello.php");
+
+        let ctx = CliRequest::new()
+            .build(&script_path)
+            .expect("failed to build CLI request");
+
+        assert!(
+            ctx.log_to_stderr,
+            "CLI request should set log_to_stderr to true"
+        );
+    }
+
+    #[test]
+    fn test_cli_execution_captures_messages() {
+        use crate::RiphtSapi;
+
+        let sapi = RiphtSapi::instance();
+        let script_path = php_script_path("error_log_test.php");
+
+        let ctx = CliRequest::new()
+            .build(&script_path)
+            .expect("failed to build CLI request");
+
+        let result = sapi
+            .execute(ctx)
+            .expect("execution should succeed");
+
+        assert!(
+            !result.messages.is_empty(),
+            "CLI execution should capture error_log messages"
+        );
+
+        assert!(
+            result
+                .messages
+                .iter()
+                .any(|m| m
+                    .message
+                    .contains("Test error log message")),
+            "Should contain the error_log message"
+        );
     }
 }

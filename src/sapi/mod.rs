@@ -1,3 +1,8 @@
+//! Core SAPI implementation and PHP lifecycle management.
+//!
+//! Handles module startup/shutdown (MINIT/MSHUTDOWN), callback registration,
+//! and provides the primary `RiphtSapi` interface for script execution.
+
 use std::ffi::CString;
 use std::sync::OnceLock;
 
@@ -21,7 +26,7 @@ static PHP_INIT_RESULT: OnceLock<Result<(), SapiError>> = OnceLock::new();
 
 pub(crate) static SAPI_NAME: &[u8] = b"ripht\0";
 pub(crate) static SAPI_PRETTY_NAME: &[u8] = b"Ripht PHP SAPI\0";
-pub(crate) static SERVER_SOFTWARE: &str = "Ripht/0.1.0";
+pub(crate) static SERVER_SOFTWARE: &str = "Ripht/0.1.0-rc.1";
 static INI_ENTRIES: &[u8] = b"\
 variables_order=EGPCS\n\
 request_order=GP\n\
@@ -32,7 +37,8 @@ display_errors=1\n\
 log_errors=1\n\
 \0";
 
-#[derive(Debug, Error)]
+/// Errors from SAPI initialization and configuration.
+#[derive(Debug, Clone, Error)]
 #[non_exhaustive]
 pub enum SapiError {
     #[error("PHP engine not initialized")]
@@ -56,14 +62,16 @@ pub enum SapiError {
     LibraryNotFound,
 }
 
+/// PHP SAPI instance. Initialize once, execute scripts repeatedly.
 pub struct RiphtSapi {
     _marker: std::marker::PhantomData<*mut ()>,
 }
 
 impl RiphtSapi {
+    // Note: will panic if initialization fails
     #[must_use]
     pub fn instance() -> Self {
-        Self::init().expect("RiphtSapi initialization failure")
+        Self::init().expect("SAPI initialization failure")
     }
 
     fn init() -> Result<Self, SapiError> {
@@ -71,57 +79,65 @@ impl RiphtSapi {
             #[cfg(feature = "tracing")]
             info!("Initializing RiphtSapi");
 
+            // SAFETY: One-time PHP engine initialization via OnceLock.
+            // All pointers/callbacks are static or 'static and remain valid.
             unsafe {
                 ffi::sapi_module.name = SAPI_NAME.as_ptr() as *mut _;
                 ffi::sapi_module.pretty_name =
                     SAPI_PRETTY_NAME.as_ptr() as *mut _;
 
-                ffi::sapi_module.startup = Some(callbacks::php_sapi_startup);
-                ffi::sapi_module.shutdown = Some(callbacks::php_sapi_shutdown);
-                ffi::sapi_module.activate = Some(callbacks::php_sapi_activate);
+                // Register callbacks
+                ffi::sapi_module.startup = Some(callbacks::ripht_sapi_startup);
+                ffi::sapi_module.shutdown =
+                    Some(callbacks::ripht_sapi_shutdown);
+                ffi::sapi_module.activate =
+                    Some(callbacks::ripht_sapi_activate);
                 ffi::sapi_module.deactivate =
-                    Some(callbacks::php_sapi_deactivate);
+                    Some(callbacks::ripht_sapi_deactivate);
 
-                ffi::sapi_module.ub_write = Some(callbacks::php_sapi_ub_write);
-                ffi::sapi_module.flush = Some(callbacks::php_sapi_flush);
+                ffi::sapi_module.ub_write =
+                    Some(callbacks::ripht_sapi_ub_write);
+                ffi::sapi_module.flush = Some(callbacks::ripht_sapi_flush);
 
                 ffi::sapi_module.send_headers =
-                    Some(callbacks::php_sapi_send_headers);
+                    Some(callbacks::ripht_sapi_send_headers);
                 ffi::sapi_module.send_header =
-                    Some(callbacks::php_sapi_send_header);
+                    Some(callbacks::ripht_sapi_send_header);
 
                 ffi::sapi_module.read_post =
-                    Some(callbacks::php_sapi_read_post);
+                    Some(callbacks::ripht_sapi_read_post);
                 ffi::sapi_module.read_cookies =
-                    Some(callbacks::php_sapi_read_cookies);
+                    Some(callbacks::ripht_sapi_read_cookies);
 
                 ffi::sapi_module.register_server_variables =
-                    Some(callbacks::php_sapi_register_server_variables);
+                    Some(callbacks::ripht_sapi_register_server_variables);
 
                 ffi::sapi_module.log_message =
-                    Some(callbacks::php_sapi_log_message);
+                    Some(callbacks::ripht_sapi_log_message);
                 ffi::sapi_module.get_request_time =
-                    Some(callbacks::php_sapi_get_request_time);
-                ffi::sapi_module.getenv = Some(callbacks::php_sapi_getenv);
+                    Some(callbacks::ripht_sapi_get_request_time);
+                ffi::sapi_module.getenv = Some(callbacks::ripht_sapi_getenv);
 
                 ffi::sapi_module.php_ini_ignore = 0;
                 ffi::sapi_module.php_ini_ignore_cwd = 1;
 
                 ffi::sapi_module.input_filter =
-                    Some(callbacks::php_sapi_input_filter);
+                    Some(callbacks::ripht_sapi_input_filter);
                 ffi::sapi_module.default_post_reader =
-                    Some(callbacks::php_sapi_default_post_reader);
+                    Some(callbacks::ripht_sapi_default_post_reader);
                 ffi::sapi_module.treat_data =
-                    Some(callbacks::php_sapi_treat_data);
+                    Some(callbacks::ripht_sapi_treat_data);
 
                 ffi::sapi_module.ini_entries = INI_ENTRIES.as_ptr() as *const _;
 
                 #[cfg(feature = "tracing")]
                 trace!("Starting SAPI");
+
                 ffi::sapi_startup(&mut ffi::sapi_module);
 
                 #[cfg(feature = "tracing")]
-                trace!("Starting PHP module");
+                trace!("Initializing SAPI module");
+
                 let result = ffi::php_module_startup(
                     &mut ffi::sapi_module,
                     std::ptr::null_mut(),
@@ -129,14 +145,16 @@ impl RiphtSapi {
 
                 if result == ffi::FAILURE {
                     #[cfg(feature = "tracing")]
-                    error!("PHP startup failed");
+                    error!("SAPI module startup failed");
+
                     ffi::sapi_shutdown();
+
                     Err(SapiError::InitializationFailed(
-                        "php_module_startup returned FAILURE".to_string(),
+                        "SAPI module initialization failed".to_string(),
                     ))
                 } else {
                     #[cfg(feature = "tracing")]
-                    info!("PHP initialized");
+                    info!("SAPI module initialized");
                     Ok(())
                 }
             }
@@ -146,13 +164,13 @@ impl RiphtSapi {
             Ok(()) => Ok(Self {
                 _marker: std::marker::PhantomData,
             }),
-            Err(e) => Err(SapiError::InitializationFailed(format!(
-                "Ripht PHP SAPI initialization failed: {}",
-                e
-            ))),
+            // Clone the original error instead of wrapping it redundantly.
+            // The error already contains descriptive context.
+            Err(e) => Err(e.clone()),
         }
     }
 
+    /// Shuts down the PHP engine. Calling `execute()` after this is undefined behavior.
     pub fn shutdown() {
         unsafe {
             ffi::php_module_shutdown();
@@ -160,32 +178,36 @@ impl RiphtSapi {
         }
     }
 
-    pub fn set_ini(&self, key: &str, value: &str) -> Result<(), SapiError> {
+    pub fn set_ini(&self, key: impl Into<Vec<u8>>, value: impl Into<Vec<u8>>) -> Result<(), SapiError> {
+        let k_str = key.into();
+            let v_str = value.into();
+
+
         let key_cstr =
-            CString::new(key).map_err(|_| SapiError::InvalidIniKey)?;
+            CString::new(k_str.clone()).map_err(|_| SapiError::InvalidIniKey)?;
         let value_cstr =
-            CString::new(value).map_err(|_| SapiError::InvalidIniValue)?;
+            CString::new(v_str.clone()).map_err(|_| SapiError::InvalidIniValue)?;
 
         unsafe {
             let init = ffi::zend_string_init_interned
-                .expect("zend_string_init_interned function pointer is null - PHP may not be properly initialized");
+                .expect("zend_string_init_interned is null");
 
-            let name = init(key_cstr.as_ptr(), key.len(), true);
+            let name = init(key_cstr.as_ptr(), k_str.len(), true);
 
             if name.is_null() {
-                return Err(SapiError::IniSetFailed(key.to_string()));
+                return Err(SapiError::IniSetFailed(String::from_utf8(k_str).unwrap_or_default()));
             }
 
             let result = ffi::zend_alter_ini_entry_chars(
                 name,
                 value_cstr.as_ptr(),
-                value.len(),
+                v_str.len(),
                 ffi::ZEND_INI_USER | ffi::ZEND_INI_SYSTEM,
                 ffi::ZEND_INI_STAGE_RUNTIME,
             );
 
             if result != ffi::SUCCESS {
-                return Err(SapiError::IniSetFailed(key.to_string()));
+                return Err(SapiError::IniSetFailed(String::from_utf8(k_str).unwrap_or_default()));
             }
 
             Ok(())
@@ -195,11 +217,11 @@ impl RiphtSapi {
     pub fn get_ini(&self, key: &str) -> Option<String> {
         #[cfg(feature = "tracing")]
         trace!(ini_key = key, "Getting INI value");
+
         let key_cstr = CString::new(key).ok()?;
 
         unsafe {
             let ptr = ffi::zend_ini_string(key_cstr.as_ptr(), key.len(), 0);
-
             if ptr.is_null() {
                 None
             } else {

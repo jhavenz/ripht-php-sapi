@@ -1,15 +1,23 @@
+use std::cell::Cell;
 use std::ffi::CString;
 use std::sync::OnceLock;
 
-use crate::execution::{ExecutionContext, ExecutionMessage};
+use crate::execution::{
+    ExecutionContext, ExecutionMessage, ExecutionResult, ResponseHeader,
+};
 use crate::sapi::ServerVarsCString;
 
+const MIN_BUFFER_SIZE: usize = 4096;
+const DEFAULT_BUFFER_SIZE: usize = 65536;
+
+/// Output buffer configuration. Set via `SAPI_INIT_BUF` and `SAPI_BUF_GROWTH` env vars.
 #[derive(Clone, Copy)]
 struct BufferPolicy {
     initial_cap: usize,
     strategy: Growth,
 }
 
+/// Buffer growth strategy when output exceeds capacity.
 #[derive(Clone, Copy)]
 enum Growth {
     X4,
@@ -24,8 +32,8 @@ fn buffer_policy() -> &'static BufferPolicy {
         let initial_cap = std::env::var("SAPI_INIT_BUF")
             .ok()
             .and_then(|v| v.parse::<usize>().ok())
-            .filter(|&n| n >= 4096)
-            .unwrap_or(65536);
+            .filter(|&n| n >= MIN_BUFFER_SIZE)
+            .unwrap_or(DEFAULT_BUFFER_SIZE);
 
         let strategy = match std::env::var("SAPI_BUF_GROWTH")
             .ok()
@@ -46,18 +54,26 @@ fn buffer_policy() -> &'static BufferPolicy {
 type FlushCallback = Box<dyn FnMut()>;
 type OutputCallback = Box<dyn FnMut(&[u8])>;
 
+/// Per-request state for the SAPI.
+///
+/// # Interior Mutability
+///
+/// `status_code` and `post_position` use `Cell` because they're mutated via raw
+/// pointers from FFI callbacks. Cell provides interior mutability without runtime
+/// overhead, making the aliasing pattern well-defined per Rust's memory model.
 pub struct ServerContext {
-    pub status_code: u16,
+    status_code: Cell<u16>,
     pub post_data: Vec<u8>,
-    pub post_position: usize,
+    post_position: Cell<usize>,
     pub output_buffer: Vec<u8>,
     pub messages: Vec<ExecutionMessage>,
     pub vars: Option<ServerVarsCString>,
     pub env_vars: Vec<(CString, CString)>,
     pub ini_overrides: Vec<(CString, CString)>,
-    pub response_headers: Vec<(String, String)>,
+    pub response_headers: Vec<ResponseHeader>,
     pub output_callback: Option<OutputCallback>,
     pub flush_callback: Option<FlushCallback>,
+    pub log_to_stderr: bool,
 }
 
 impl Default for ServerContext {
@@ -69,19 +85,25 @@ impl Default for ServerContext {
 impl ServerContext {
     pub fn new() -> Self {
         let policy = buffer_policy();
+
         Self {
             post_data: Vec::new(),
-            post_position: 0,
+            post_position: Cell::new(0),
             output_buffer: Vec::with_capacity(policy.initial_cap),
-            status_code: 200,
-            messages: Vec::with_capacity(4),
+            status_code: Cell::new(200),
+            messages: Vec::with_capacity(8),
             vars: None,
             env_vars: Vec::new(),
             ini_overrides: Vec::new(),
-            response_headers: Vec::with_capacity(8),
+            response_headers: Vec::with_capacity(16),
             output_callback: None,
             flush_callback: None,
+            log_to_stderr: false,
         }
+    }
+
+    pub fn status_code(&self) -> u16 {
+        self.status_code.get()
     }
 
     pub fn content_type_ptr(&self) -> *const std::ffi::c_char {
@@ -119,28 +141,25 @@ impl ServerContext {
             .unwrap_or(&[])
     }
 
-    pub fn read_post(&mut self, buffer: &mut [u8]) -> usize {
+    pub fn read_post(&self, buffer: &mut [u8]) -> usize {
         if buffer.is_empty() {
             return 0;
         }
 
-        let remaining_post_data = self
+        let pos = self.post_position.get();
+        let remaining = self
             .post_data
             .len()
-            .saturating_sub(self.post_position);
+            .saturating_sub(pos);
+        let to_copy = remaining.min(buffer.len());
 
-        let post_data_overflow = remaining_post_data.min(buffer.len());
-
-        if post_data_overflow > 0 {
-            let start = self.post_position;
-            let end = start + post_data_overflow;
-            buffer[..post_data_overflow]
-                .copy_from_slice(&self.post_data[start..end]);
-
-            self.post_position = end;
+        if to_copy > 0 {
+            let end = pos + to_copy;
+            buffer[..to_copy].copy_from_slice(&self.post_data[pos..end]);
+            self.post_position.set(end);
         }
 
-        post_data_overflow
+        to_copy
     }
 
     pub fn write_output(&mut self, data: &[u8]) -> usize {
@@ -181,13 +200,13 @@ impl ServerContext {
         data.len()
     }
 
-    pub fn add_header(&mut self, name: String, value: String) {
+    pub fn add_header(&mut self, header: ResponseHeader) {
         self.response_headers
-            .push((name, value));
+            .push(header);
     }
 
-    pub fn set_status(&mut self, code: u16) {
-        self.status_code = code;
+    pub fn set_status(&self, code: u16) {
+        self.status_code.set(code);
     }
 
     pub fn add_message(&mut self, message: ExecutionMessage) {
@@ -217,6 +236,15 @@ impl ServerContext {
             .find(|(k, _)| k.as_bytes() == key)
             .map(|(_, v)| v.as_ptr())
     }
+
+    pub fn into_result(self, body: Vec<u8>) -> ExecutionResult {
+        ExecutionResult {
+            status: self.status_code.get(),
+            headers: self.response_headers,
+            body,
+            messages: self.messages,
+        }
+    }
 }
 
 impl From<ExecutionContext> for Box<ServerContext> {
@@ -224,6 +252,7 @@ impl From<ExecutionContext> for Box<ServerContext> {
         let mut server_ctx = Box::new(ServerContext::new());
 
         server_ctx.post_data = ctx.input;
+        server_ctx.log_to_stderr = ctx.log_to_stderr;
 
         server_ctx.vars = Some(
             ctx.server_vars

@@ -366,23 +366,14 @@ mod tests {
     }
 
     #[test]
-    fn test_cli_defaults_no_gateway_interface() {
-        let vars = ServerVars::cli_defaults();
-        let vec = vars.into_vec();
-        let map: std::collections::HashMap<_, _> = vec.into_iter().collect();
-
-        assert!(!map.contains_key("GATEWAY_INTERFACE"));
-    }
-
-    #[test]
     fn test_cli_defaults() {
         let vars = ServerVars::cli_defaults();
         let vec = vars.into_vec();
         let map: std::collections::HashMap<_, _> = vec.into_iter().collect();
 
         assert!(map.contains_key("REQUEST_TIME"));
-
         assert_eq!(map.get("DOCUMENT_ROOT"), Some(&"".to_string()));
+        assert!(!map.contains_key("GATEWAY_INTERFACE"));
     }
 
     #[test]

@@ -1,11 +1,16 @@
+use super::header::ResponseHeader;
 use super::message::{ExecutionMessage, SyslogLevel};
 
+/// Result of PHP script execution.
+///
+/// Contains the HTTP status code, response headers, body output,
+/// and any PHP errors/warnings/notices logged during execution.
 #[must_use]
 #[derive(Debug, Clone)]
 pub struct ExecutionResult {
     pub status: u16,
     pub body: Vec<u8>,
-    pub headers: Vec<(String, String)>,
+    pub headers: Vec<ResponseHeader>,
     pub messages: Vec<ExecutionMessage>,
 }
 
@@ -47,15 +52,21 @@ impl ExecutionResult {
     pub fn header(&self, name: &str) -> Option<&str> {
         self.headers
             .iter()
-            .find(|(n, _)| n.eq_ignore_ascii_case(name))
-            .map(|(_, v)| v.as_str())
+            .find(|h| {
+                h.name()
+                    .eq_ignore_ascii_case(name)
+            })
+            .map(|h| h.value())
     }
 
     pub fn headers_all(&self, name: &str) -> Vec<&str> {
         self.headers
             .iter()
-            .filter(|(n, _)| n.eq_ignore_ascii_case(name))
-            .map(|(_, v)| v.as_str())
+            .filter(|h| {
+                h.name()
+                    .eq_ignore_ascii_case(name)
+            })
+            .map(|h| h.value())
             .collect()
     }
 
@@ -92,8 +103,8 @@ impl ExecutionResult {
     pub fn into_http_response(self) -> http::Response<Vec<u8>> {
         let mut builder = http::Response::builder().status(self.status);
 
-        for (name, value) in &self.headers {
-            builder = builder.header(name.as_str(), value.as_str());
+        for h in &self.headers {
+            builder = builder.header(h.name(), h.value());
         }
 
         builder

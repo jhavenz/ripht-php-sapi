@@ -2,7 +2,7 @@
 //!
 //! Run: `cargo run --example file_io`
 
-use std::{path::PathBuf};
+use std::path::PathBuf;
 
 use ripht_php_sapi::{RiphtSapi, WebRequest};
 
@@ -31,7 +31,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         (
             WebRequest::get().with_uri("/?action=sqlite&rows=500"),
             "SQLite (500 rows):",
-        ),
+        )
     ];
 
     for (req, msg) in reqs {

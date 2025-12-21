@@ -1,8 +1,17 @@
+//! Web request builder for HTTP-style execution.
+//!
+//! Populates `$_SERVER`, `$_GET`, `$_POST`, `$_COOKIE`, and handles
+//! the mapping from HTTP semantics to PHP superglobals.
+
 use std::path::{Path, PathBuf};
 
 use crate::execution::ExecutionContext;
 use crate::sapi::ServerVars;
 
+#[cfg(feature = "tracing")]
+use tracing::debug;
+
+/// Errors from building a web request.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum WebRequestError {
@@ -25,6 +34,7 @@ impl std::fmt::Display for WebRequestError {
 
 impl std::error::Error for WebRequestError {}
 
+/// HTTP request method.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Method {
     Get,
@@ -81,6 +91,10 @@ impl Method {
     }
 }
 
+/// Builder for web-style PHP requests.
+///
+/// Use the `with_*` methods to configure headers, cookies, body, and server
+/// info, then call `build()` to create an `ExecutionContext`.
 #[derive(Debug, Clone)]
 pub struct WebRequest {
     https: bool,
@@ -119,7 +133,15 @@ impl Default for WebRequest {
             document_root: None,
             path_info: None,
             env_vars: Vec::new(),
-            ini_overrides: Vec::new(),
+            ini_overrides: vec![
+                ("log_errors".to_string(), "1".to_string()),
+                ("html_errors".to_string(), "0".to_string()),
+                ("request_order".to_string(), "GP".to_string()),
+                ("display_errors".to_string(), "1".to_string()),
+                ("implicit_flush".to_string(), "0".to_string()),
+                ("variables_order".to_string(), "EGPCS".to_string()),
+                ("output_buffering".to_string(), "4096".to_string()),
+            ],
         }
     }
 }
@@ -359,6 +381,13 @@ impl WebRequest {
             .method
             .ok_or(WebRequestError::MissingMethod)?;
 
+        #[cfg(feature = "tracing")]
+        debug!(
+            method = %method,
+            uri = ?self.uri,
+            "Building Web request"
+        );
+
         let script_path = script_path
             .as_ref()
             .to_path_buf();
@@ -450,6 +479,7 @@ impl WebRequest {
             input: self.body,
             env_vars: self.env_vars,
             ini_overrides: self.ini_overrides,
+            log_to_stderr: false,
         })
     }
 }
@@ -499,3 +529,59 @@ mod http_compat {
 
 #[cfg(feature = "http")]
 pub use http_compat::{from_http_parts, from_http_request};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn php_script_path(name: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/php_scripts")
+            .join(name)
+    }
+
+    #[test]
+    fn test_web_request_sets_log_to_stderr_false() {
+        let script_path = php_script_path("hello.php");
+        let ctx = WebRequest::get()
+            .build(&script_path)
+            .expect("failed to build Web request");
+
+        assert!(
+            !ctx.log_to_stderr,
+            "Web request should set log_to_stderr to false"
+        );
+    }
+
+    #[test]
+    fn test_web_execution_captures_messages() {
+        use crate::RiphtSapi;
+
+        let sapi = RiphtSapi::instance();
+        let script_path = php_script_path("error_log_test.php");
+
+        let ctx = WebRequest::get()
+            .build(&script_path)
+            .expect("failed to build Web request");
+
+        let result = sapi
+            .execute(ctx)
+            .expect("execution should succeed");
+
+        assert!(
+            !result.messages.is_empty(),
+            "Web execution should capture error_log messages"
+        );
+
+        assert!(
+            result
+                .messages
+                .iter()
+                .any(|m| m
+                    .message
+                    .contains("Test error log message")),
+            "Should contain the error_log message"
+        );
+    }
+}

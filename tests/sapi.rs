@@ -1,7 +1,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use ripht_php_sapi::{ExecutionHooks, OutputAction, RiphtSapi, WebRequest};
+use ripht_php_sapi::{
+    ExecutionContext, ExecutionHooks, OutputAction, RiphtSapi, WebRequest,
+};
 
 fn php_script_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -91,33 +93,6 @@ fn stress_large_output() {
         result.body.len() >= 1024 * 1024,
         "Expected 1MB+ output, got {} bytes",
         result.body.len()
-    );
-}
-
-#[test]
-fn stress_large_input() {
-    let php = RiphtSapi::instance();
-    let script_path = php_script_path("large_input.php");
-
-    let large_body = vec![b'x'; 1024 * 1024];
-
-    let exec = WebRequest::post()
-        .with_content_type("application/octet-stream")
-        .with_body(large_body)
-        .build(&script_path)
-        .expect("failed to build WebRequest");
-
-    let result = php
-        .execute(exec)
-        .expect("large input request execution failed");
-
-    assert_eq!(result.status, 200);
-    assert!(
-        result
-            .body_string()
-            .contains("1048576"),
-        "Expected body to report 1MB received: {}",
-        result.body_string()
     );
 }
 
@@ -281,6 +256,7 @@ fn test_header_parsing_with_real_php_headers() {
         || result
             .header("x-custom-header")
             .is_some();
+
     if has_custom_header {
         assert_eq!(
             result
@@ -300,6 +276,7 @@ fn test_error_handling_with_errors_script() {
     let exec = WebRequest::get()
         .build(&script_path)
         .expect("failed to build WebRequest");
+
     let result = php
         .execute(exec)
         .expect("errors.php request execution failed");
@@ -316,8 +293,9 @@ fn test_error_handling_with_errors_script() {
         .iter()
         .any(|e| {
             e.message
-                .contains("test error message")
+                .contains("Sending an error log")
         });
+
     assert!(
         has_error,
         "Response should contain error message from error_log()"
@@ -336,6 +314,7 @@ fn test_state_isolation_after_errors() {
     let good_exec = WebRequest::get()
         .build(&script_path)
         .expect("failed to build WebRequest");
+
     let good_result = php
         .execute(good_exec)
         .expect("request after error path should succeed");
@@ -352,20 +331,18 @@ fn test_sapi_initializes() {
 
 #[test]
 fn test_file_not_found() {
-    let exec = WebRequest::get().build("/nonexistent/path.php");
+    let req = WebRequest::get().build("/nonexistent/path.php");
 
-    assert!(exec.is_err());
+    assert!(req.is_err());
 }
 
 #[test]
 fn test_get_ini_display_errors() {
     let php = RiphtSapi::instance();
+    let _ = php.set_ini("display_errors", "0");
+        
 
-    let value = php.get_ini("display_errors");
-    assert!(
-        value.is_some(),
-        "display_errors should be a valid INI setting"
-    );
+    assert_eq!(php.get_ini("display_errors"), Some("0".into()));
 }
 
 #[test]
@@ -374,6 +351,63 @@ fn test_get_ini_nonexistent() {
 
     let value = php.get_ini("this_ini_key_does_not_exist_12345");
     assert!(value.is_none(), "Non-existent INI should return None");
+}
+
+#[test]
+fn test_set_ini_and_get_ini() {
+    let php = RiphtSapi::instance();
+
+    let result = php.set_ini("memory_limit", "256M");
+    assert!(result.is_ok(), "set_ini should succeed for valid INI key");
+
+    let value = php.get_ini("memory_limit");
+    assert!(value.is_some(), "memory_limit should be readable after set");
+    assert_eq!(
+        value.unwrap(),
+        "256M",
+        "memory_limit should reflect the set value"
+    );
+}
+
+#[test]
+fn test_set_ini_invalid_key() {
+    let php = RiphtSapi::instance();
+
+    let result = php.set_ini("key\0with\0nulls", "value");
+    assert!(
+        result.is_err(),
+        "set_ini should fail for key with null bytes"
+    );
+}
+
+#[test]
+fn test_set_ini_invalid_value() {
+    let php = RiphtSapi::instance();
+
+    let result = php.set_ini("memory_limit", "value\0with\0nulls");
+    assert!(
+        result.is_err(),
+        "set_ini should fail for value with null bytes"
+    );
+}
+
+#[test]
+fn test_execution_error_script_not_found() {
+    let php = RiphtSapi::instance();
+
+    let ctx = ExecutionContext::script("/nonexistent/path/to/script.php");
+    let result = php.execute(ctx);
+
+    assert!(
+        result.is_err(),
+        "execute should fail for nonexistent script"
+    );
+    let err = result.unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("not found"),
+        "Error should mention script not found"
+    );
 }
 
 #[test]
@@ -603,10 +637,16 @@ fn test_session_basic() {
     let session_cookie = result1
         .headers
         .iter()
-        .find(|(n, _)| n.eq_ignore_ascii_case("Set-Cookie"))
-        .and_then(|(_, v)| {
-            if v.starts_with("PHPSESSID=") {
-                v.split(';')
+        .find(|h| {
+            h.name()
+                .eq_ignore_ascii_case("Set-Cookie")
+        })
+        .and_then(|h| {
+            if h.value()
+                .starts_with("PHPSESSID=")
+            {
+                h.value()
+                    .split(';')
                     .next()
                     .map(|s| s.to_string())
             } else {

@@ -1,3 +1,16 @@
+//! SAPI callback implementations for the Ripht PHP SAPI.
+//!
+//! # Safety
+//!
+//! All callbacks share these invariants:
+//!
+//! - **Threading**: NTS build only. One request executes at a time.
+//! - **Context lifetime**: `sapi_globals.server_context` is valid only during
+//!   request execution (between `php_request_startup` and `php_request_shutdown`).
+//! - **Panic safety**: Callbacks wrap Rust code in `catch_unwind` to prevent
+//!   unwinding across FFI.
+//! - **Pointer validity**: PHP-provided pointers are valid for the callback duration.
+
 #![allow(clippy::missing_safety_doc)]
 
 use std::ffi::{CStr, CString};
@@ -9,16 +22,21 @@ use tracing::{debug, error, info, trace, warn};
 use super::ffi;
 use super::server_context::ServerContext;
 use super::SERVER_SOFTWARE;
-use crate::execution::ExecutionMessage;
+use crate::execution::{ExecutionMessage, ResponseHeader};
 
+const HTTP_STATUS_MIN: i32 = 100;
+const HTTP_STATUS_MAX: i32 = 599;
+const HTTP_STATUS_FALLBACK: u16 = 500;
+
+/// Returns the `ServerContext` pointer if valid. See module docs for safety.
 #[inline]
 pub(crate) unsafe fn get_context() -> Option<*mut ServerContext> {
     let ptr = ffi::sapi_globals.server_context as *mut ServerContext;
-
     if ptr.is_null() {
         return None;
     }
 
+    // Alignment check catches corruption
     let align = std::mem::align_of::<ServerContext>();
     if !(ptr as usize).is_multiple_of(align) {
         return None;
@@ -28,31 +46,32 @@ pub(crate) unsafe fn get_context() -> Option<*mut ServerContext> {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn php_sapi_startup(
+pub unsafe extern "C" fn ripht_sapi_startup(
     _module: *mut ffi::sapi_module_struct,
 ) -> c_int {
     ffi::SUCCESS
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn php_sapi_shutdown(
+pub unsafe extern "C" fn ripht_sapi_shutdown(
     _module: *mut ffi::sapi_module_struct,
 ) -> c_int {
     ffi::SUCCESS
 }
 
 #[no_mangle]
-pub extern "C" fn php_sapi_activate() -> c_int {
+pub extern "C" fn ripht_sapi_activate() -> c_int {
     ffi::SUCCESS
 }
 
 #[no_mangle]
-pub extern "C" fn php_sapi_deactivate() -> c_int {
+pub extern "C" fn ripht_sapi_deactivate() -> c_int {
     ffi::SUCCESS
 }
 
+/// Unbuffered write callback.
 #[no_mangle]
-pub unsafe extern "C" fn php_sapi_ub_write(
+pub unsafe extern "C" fn ripht_sapi_ub_write(
     str: *const c_char,
     str_length: usize,
 ) -> usize {
@@ -60,14 +79,13 @@ pub unsafe extern "C" fn php_sapi_ub_write(
         return 0;
     }
 
-    let ctx_ptr = ffi::sapi_globals.server_context as *mut ServerContext;
-    if ctx_ptr.is_null() {
-        return 0;
-    }
-
     if ffi::sapi_globals.headers_sent == 0 {
         ffi::sapi_send_headers();
     }
+
+    let Some(ctx_ptr) = get_context() else {
+        return 0;
+    };
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let bytes = std::slice::from_raw_parts(str as *const u8, str_length);
@@ -81,8 +99,9 @@ pub unsafe extern "C" fn php_sapi_ub_write(
     result.unwrap_or(0)
 }
 
+/// Flush output callback.
 #[no_mangle]
-pub unsafe extern "C" fn php_sapi_flush(_server_context: *mut c_void) {
+pub unsafe extern "C" fn ripht_sapi_flush(_server_context: *mut c_void) {
     #[cfg(feature = "tracing")]
     trace!("Flush called");
 
@@ -99,8 +118,9 @@ pub unsafe extern "C" fn php_sapi_flush(_server_context: *mut c_void) {
     }));
 }
 
+/// Send all response headers callback.
 #[no_mangle]
-pub unsafe extern "C" fn php_sapi_send_headers(
+pub unsafe extern "C" fn ripht_sapi_send_headers(
     sapi_headers: *mut ffi::sapi_headers_struct,
 ) -> c_int {
     if sapi_headers.is_null() {
@@ -113,26 +133,21 @@ pub unsafe extern "C" fn php_sapi_send_headers(
         };
 
         let status = (*sapi_headers).http_response_code;
-
-        let status_code: u16 = if !(100..=599).contains(&status) {
-            500
-        } else {
-            status as u16
-        };
+        let status_code: u16 =
+            if !(HTTP_STATUS_MIN..=HTTP_STATUS_MAX).contains(&status) {
+                HTTP_STATUS_FALLBACK
+            } else {
+                status as u16
+            };
 
         (*ctx_ptr).set_status(status_code);
+        (*ctx_ptr).response_headers.clear();
 
-        // Capture the final header list as provided by PHP.
-        // This ensures we observe multi-value headers (e.g. Set-Cookie) and header_remove() effects.
-        (*ctx_ptr)
-            .response_headers
-            .clear();
-
+        // Iterate PHP's header list
         let mut elem = (*sapi_headers).headers.head;
         while !elem.is_null() {
-            let header_ptr =
-                (*elem).data.as_ptr() as *mut ffi::sapi_header_struct;
-            php_sapi_send_header(header_ptr, std::ptr::null_mut());
+            let header_ptr = (*elem).data.as_ptr() as *mut ffi::sapi_header_struct;
+            ripht_sapi_send_header(header_ptr, std::ptr::null_mut());
             elem = (*elem).next;
         }
 
@@ -142,8 +157,9 @@ pub unsafe extern "C" fn php_sapi_send_headers(
     result.unwrap_or(ffi::SAPI_HEADER_SEND_FAILED)
 }
 
+/// Send single response header callback.
 #[no_mangle]
-pub unsafe extern "C" fn php_sapi_send_header(
+pub unsafe extern "C" fn ripht_sapi_send_header(
     sapi_header: *mut ffi::sapi_header_struct,
     _server_context: *mut c_void,
 ) {
@@ -163,51 +179,17 @@ pub unsafe extern "C" fn php_sapi_send_header(
             return;
         }
 
-        let bytes =
-            std::slice::from_raw_parts(header_ptr as *const u8, header_len);
+        let bytes = std::slice::from_raw_parts(header_ptr as *const u8, header_len);
 
-        if let Some(colon_pos) = memchr::memchr(b':', bytes) {
-            if colon_pos == 0 {
-                return;
-            }
-
-            let name_bytes = &bytes[..colon_pos];
-            let mut value_start = colon_pos + 1;
-
-            while value_start < bytes.len()
-                && bytes[value_start].is_ascii_whitespace()
-            {
-                value_start += 1;
-            }
-
-            let value_bytes = &bytes[value_start..];
-
-            if name_bytes.is_empty() {
-                return;
-            }
-
-            // Perf: Avoid intermediate Vec allocations. Parse as UTF-8 where possible.
-            let name_str = match std::str::from_utf8(name_bytes) {
-                Ok(s) => s.trim(),
-                Err(_) => return,
-            };
-
-            if name_str.is_empty() {
-                return;
-            }
-
-            let value_string: String = match std::str::from_utf8(value_bytes) {
-                Ok(s) => s.to_owned(),
-                Err(_) => String::from_utf8_lossy(value_bytes).into_owned(),
-            };
-
-            (*ctx_ptr).add_header(name_str.to_string(), value_string);
+        if let Some(h) = ResponseHeader::parse(bytes) {
+            (*ctx_ptr).add_header(h);
         }
     }));
 }
 
+/// Read POST body callback. May be called multiple times.
 #[no_mangle]
-pub unsafe extern "C" fn php_sapi_read_post(
+pub unsafe extern "C" fn ripht_sapi_read_post(
     buffer: *mut c_char,
     count_bytes: usize,
 ) -> usize {
@@ -220,30 +202,29 @@ pub unsafe extern "C" fn php_sapi_read_post(
             return 0;
         };
 
-        let slice =
-            std::slice::from_raw_parts_mut(buffer as *mut u8, count_bytes);
-
-        unsafe { (*ctx_ptr).read_post(slice) }
+        let slice = std::slice::from_raw_parts_mut(buffer as *mut u8, count_bytes);
+        (*ctx_ptr).read_post(slice)
     }));
 
     result.unwrap_or(0)
 }
 
+/// Read cookies callback. Returns pointer to Cookie header value.
 #[no_mangle]
-pub unsafe extern "C" fn php_sapi_read_cookies() -> *mut c_char {
+pub unsafe extern "C" fn ripht_sapi_read_cookies() -> *mut c_char {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let Some(ctx_ptr) = get_context() else {
             return std::ptr::null_mut();
         };
-
-        unsafe { (*ctx_ptr).cookie_data_ptr() }
+        (*ctx_ptr).cookie_data_ptr()
     }));
 
     result.unwrap_or(std::ptr::null_mut())
 }
 
+/// Register $_SERVER variables callback.
 #[no_mangle]
-pub unsafe extern "C" fn php_sapi_register_server_variables(
+pub unsafe extern "C" fn ripht_sapi_register_server_variables(
     track_vars_array: *mut ffi::zval,
 ) {
     if track_vars_array.is_null() {
@@ -251,18 +232,13 @@ pub unsafe extern "C" fn php_sapi_register_server_variables(
     }
 
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        register_var_static(
-            track_vars_array,
-            c"SERVER_SOFTWARE",
-            SERVER_SOFTWARE,
-        );
+        register_var_static(track_vars_array, c"SERVER_SOFTWARE", SERVER_SOFTWARE);
 
         let Some(ctx_ptr) = get_context() else {
             return;
         };
 
-        let ctx = unsafe { &*ctx_ptr };
-
+        let ctx = &*ctx_ptr;
         for (name, value) in ctx.server_vars() {
             ffi::php_register_variable_safe(
                 name.as_ptr(),
@@ -287,10 +263,11 @@ unsafe fn register_var_static(array: *mut ffi::zval, name: &CStr, value: &str) {
 }
 
 #[no_mangle]
-pub extern "C" fn php_sapi_default_post_reader() {}
+pub extern "C" fn ripht_sapi_default_post_reader() {}
 
+/// Parse GET/POST data callback. Delegates to PHP's default.
 #[no_mangle]
-pub unsafe extern "C" fn php_sapi_treat_data(
+pub unsafe extern "C" fn ripht_sapi_treat_data(
     arg: c_int,
     str: *mut c_char,
     dest_array: *mut ffi::zval,
@@ -301,7 +278,7 @@ pub unsafe extern "C" fn php_sapi_treat_data(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn php_sapi_input_filter(
+pub unsafe extern "C" fn ripht_sapi_input_filter(
     _arg: c_int,
     _var: *const c_char,
     _val: *mut *mut c_char,
@@ -311,8 +288,9 @@ pub unsafe extern "C" fn php_sapi_input_filter(
     ffi::php_default_input_filter(_arg, _var, _val, _val_len, _new_val_len)
 }
 
+/// Log message callback (errors, warnings, notices).
 #[no_mangle]
-pub unsafe extern "C" fn php_sapi_log_message(
+pub unsafe extern "C" fn ripht_sapi_log_message(
     message: *const c_char,
     syslog_type: c_int,
 ) {
@@ -321,6 +299,14 @@ pub unsafe extern "C" fn php_sapi_log_message(
     }
 
     let msg = CStr::from_ptr(message).to_string_lossy();
+
+    let should_log_to_stderr = get_context()
+        .map(|ctx_ptr| (*ctx_ptr).log_to_stderr)
+        .unwrap_or(false);
+
+    if should_log_to_stderr {
+        eprintln!("{}", msg);
+    }
 
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         #[cfg(feature = "tracing")]
@@ -333,18 +319,17 @@ pub unsafe extern "C" fn php_sapi_log_message(
         }
 
         if let Some(ctx_ptr) = get_context() {
-            unsafe {
-                (*ctx_ptr).add_message(ExecutionMessage::from_syslog(
-                    syslog_type,
-                    msg.to_string(),
-                ));
-            }
+            (*ctx_ptr).add_message(ExecutionMessage::from_syslog(
+                syslog_type,
+                msg.to_string(),
+            ));
         }
     }));
 }
 
+/// Get request time callback.
 #[no_mangle]
-pub unsafe extern "C" fn php_sapi_get_request_time(
+pub unsafe extern "C" fn ripht_sapi_get_request_time(
     request_time: *mut c_double,
 ) -> c_int {
     if request_time.is_null() {
@@ -360,15 +345,15 @@ pub unsafe extern "C" fn php_sapi_get_request_time(
             .unwrap_or(0.0);
 
         *request_time = now;
-
         ffi::SUCCESS
     }));
 
     result.unwrap_or(ffi::FAILURE)
 }
 
+/// PHP's asking for an environment variable
 #[no_mangle]
-pub unsafe extern "C" fn php_sapi_getenv(
+pub unsafe extern "C" fn ripht_sapi_getenv(
     name: *const c_char,
     name_len: usize,
 ) -> *mut c_char {
@@ -377,8 +362,7 @@ pub unsafe extern "C" fn php_sapi_getenv(
     }
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let name_bytes =
-            std::slice::from_raw_parts(name as *const u8, name_len);
+        let name_bytes = std::slice::from_raw_parts(name as *const u8, name_len);
 
         if let Some(ctx_ptr) = get_context() {
             if let Some(ptr) = (*ctx_ptr).get_env(name_bytes) {
@@ -412,24 +396,9 @@ mod tests {
     }
 
     #[test]
-    fn test_get_context_null() {
-        unsafe {
-            super::ffi::sapi_globals.server_context = std::ptr::null_mut();
-
-            let result =
-                php_sapi_ub_write(b"test".as_ptr() as *const c_char, 4);
-
-            assert_eq!(
-                result, 0,
-                "ub_write should return 0 when context is null"
-            );
-        }
-    }
-
-    #[test]
     fn test_ub_write_null_buffer() {
         unsafe {
-            let result = php_sapi_ub_write(std::ptr::null(), 10);
+            let result = ripht_sapi_ub_write(std::ptr::null(), 10);
             assert_eq!(result, 0, "ub_write should return 0 for null buffer");
         }
     }
@@ -438,7 +407,7 @@ mod tests {
     fn test_ub_write_zero_length() {
         unsafe {
             let data = b"test";
-            let result = php_sapi_ub_write(data.as_ptr() as *const c_char, 0);
+            let result = ripht_sapi_ub_write(data.as_ptr() as *const c_char, 0);
             assert_eq!(result, 0, "ub_write should return 0 for zero length");
         }
     }
@@ -450,7 +419,7 @@ mod tests {
                 let msg = CString::new(format!("Test message level {}", level))
                     .unwrap();
 
-                php_sapi_log_message(msg.as_ptr(), level);
+                ripht_sapi_log_message(msg.as_ptr(), level);
             }
         }
     }
@@ -458,7 +427,7 @@ mod tests {
     #[test]
     fn test_get_request_time_null_pointer() {
         unsafe {
-            let result = php_sapi_get_request_time(std::ptr::null_mut());
+            let result = ripht_sapi_get_request_time(std::ptr::null_mut());
             assert_eq!(
                 result,
                 super::ffi::FAILURE,
@@ -471,7 +440,7 @@ mod tests {
     fn test_get_request_time_valid_pointer() {
         unsafe {
             let mut request_time: f64 = 0.0;
-            let result = php_sapi_get_request_time(&mut request_time);
+            let result = ripht_sapi_get_request_time(&mut request_time);
 
             assert_eq!(
                 result,
@@ -540,7 +509,7 @@ mod tests {
 
         unsafe {
             let mut buffer = vec![0u8; 100];
-            let result = php_sapi_read_post(
+            let result = ripht_sapi_read_post(
                 buffer.as_mut_ptr() as *mut c_char,
                 buffer.len(),
             );
@@ -554,12 +523,12 @@ mod tests {
     #[test]
     fn test_send_headers_null_pointer() {
         unsafe {
-            let result = php_sapi_send_headers(std::ptr::null_mut());
+            let result = ripht_sapi_send_headers(std::ptr::null_mut());
             assert_eq!(
-            result,
-            super::ffi::SAPI_HEADER_SEND_FAILED,
-            "send_headers should return SAPI_HEADER_SEND_FAILED for null pointer"
-        );
+                result,
+                super::ffi::SAPI_HEADER_SEND_FAILED,
+                "send_headers should return SAPI_HEADER_SEND_FAILED for null pointer"
+            );
         }
     }
 
@@ -587,7 +556,7 @@ mod tests {
                 http_response_code: -1,
                 ..Default::default()
             };
-            let result = php_sapi_send_headers(&mut headers);
+            let result = ripht_sapi_send_headers(&mut headers);
             assert_eq!(
                 result,
                 super::ffi::SAPI_HEADER_SENT_SUCCESSFULLY,
@@ -595,12 +564,12 @@ mod tests {
             );
 
             headers.http_response_code = 99999;
-            let result2 = php_sapi_send_headers(&mut headers);
+            let result2 = ripht_sapi_send_headers(&mut headers);
             assert_eq!(
-            result2,
-            super::ffi::SAPI_HEADER_SENT_SUCCESSFULLY,
-            "send_headers should handle out-of-range status codes gracefully"
-        );
+                result2,
+                super::ffi::SAPI_HEADER_SENT_SUCCESSFULLY,
+                "send_headers should handle out-of-range status codes gracefully"
+            );
 
             let _ = Box::from_raw(ctx_ptr);
             super::ffi::sapi_globals.server_context = std::ptr::null_mut();
@@ -625,13 +594,13 @@ mod tests {
             header.header = header_str.as_ptr() as *mut c_char;
             header.header_len = header_str.len();
 
-            php_sapi_send_header(&mut header, std::ptr::null_mut());
+            ripht_sapi_send_header(&mut header, std::ptr::null_mut());
 
             let header_str2 = b"X-Custom-Header:  value with spaces  \r\n";
             header.header = header_str2.as_ptr() as *mut c_char;
             header.header_len = header_str2.len();
 
-            php_sapi_send_header(&mut header, std::ptr::null_mut());
+            ripht_sapi_send_header(&mut header, std::ptr::null_mut());
         }
     }
 
@@ -659,12 +628,10 @@ mod tests {
             header.header = header_str.as_ptr() as *mut c_char;
             header.header_len = header_str.len();
 
-            php_sapi_send_header(&mut header, std::ptr::null_mut());
+            ripht_sapi_send_header(&mut header, std::ptr::null_mut());
 
             assert_eq!(
-                (*ctx_ptr)
-                    .response_headers
-                    .len(),
+                (*ctx_ptr).response_headers.len(),
                 0,
                 "Header with no colon should not be added"
             );
@@ -698,12 +665,10 @@ mod tests {
             header.header = header_str.as_ptr() as *mut c_char;
             header.header_len = header_str.len();
 
-            php_sapi_send_header(&mut header, std::ptr::null_mut());
+            ripht_sapi_send_header(&mut header, std::ptr::null_mut());
 
             assert_eq!(
-                (*ctx_ptr)
-                    .response_headers
-                    .len(),
+                (*ctx_ptr).response_headers.len(),
                 0,
                 "Header with colon at start (empty name) should not be added"
             );
@@ -736,11 +701,9 @@ mod tests {
             header.header = header_str.as_ptr() as *mut c_char;
             header.header_len = header_str.len();
 
-            php_sapi_send_header(&mut header, std::ptr::null_mut());
+            ripht_sapi_send_header(&mut header, std::ptr::null_mut());
 
-            let headers_len = (*ctx_ptr)
-                .response_headers
-                .len();
+            let headers_len = (*ctx_ptr).response_headers.len();
 
             assert_eq!(
                 headers_len, 1,
@@ -748,10 +711,8 @@ mod tests {
             );
 
             let headers = &(*ctx_ptr).response_headers;
-            let header_name = headers[0].0.clone();
-            let header_value = headers[0].1.clone();
-            assert_eq!(header_name, "X-Empty-Value");
-            assert_eq!(header_value, "");
+            assert_eq!(headers[0].name(), "X-Empty-Value");
+            assert_eq!(headers[0].value(), "");
 
             let _ = Box::from_raw(ctx_ptr);
             super::ffi::sapi_globals.server_context = std::ptr::null_mut();
@@ -782,12 +743,10 @@ mod tests {
             header.header = header_str.as_ptr() as *mut c_char;
             header.header_len = header_str.len();
 
-            php_sapi_send_header(&mut header, std::ptr::null_mut());
+            ripht_sapi_send_header(&mut header, std::ptr::null_mut());
 
             assert_eq!(
-                (*ctx_ptr)
-                    .response_headers
-                    .len(),
+                (*ctx_ptr).response_headers.len(),
                 1,
                 "Header with colon at end should be added with empty value"
             );

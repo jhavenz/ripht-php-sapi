@@ -1,6 +1,6 @@
 //! Tests UTF-8, multi-byte character encodings, and emoji handling in query params and POST bodies.
 //!
-//! Run: `cargo run --example encoding_guanlet`
+//! Run: `cargo run --example encoding_gaunlet`
 
 use std::path::PathBuf;
 
@@ -9,7 +9,12 @@ use ripht_php_sapi::{RiphtSapi, WebRequest};
 fn percent_encode(s: &str) -> String {
     let mut result = String::new();
     for byte in s.bytes() {
-        if byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_' || byte == b'.' || byte == b'~' {
+        if byte.is_ascii_alphanumeric()
+            || byte == b'-'
+            || byte == b'_'
+            || byte == b'.'
+            || byte == b'~'
+        {
             result.push(byte as char);
         } else {
             result.push_str(&format!("%{:02X}", byte));
@@ -22,7 +27,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sapi = RiphtSapi::instance();
     let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/php_scripts")
-        .join("encoding_guanlet.php");
+        .join("encoding_gaunlet.php");
 
     println!("=== PHP Encoding Test ===\n");
 
@@ -31,22 +36,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ("Cyrillic", "Привет мир"),
         ("Arabic", "مرحبا"),
         ("Mixed scripts", "Привет مرحبا 你好"),
-        ("Emoji sequence", "👨‍👩‍👧‍👦 🏳️‍🌈"),
+        ("Emoji sequence", "👨‍👩‍👧‍👦 🤞"),
         ("Special chars", "Tab:\tQuote:\"Backslash:\\"),
     ];
 
     for (name, data) in test_strings {
         let encoded = percent_encode(data);
+        
         let exec = WebRequest::get()
             .with_uri(format!("/?data={}", encoded))
             .build(&script)?;
+        
         let result = sapi.execute(exec)?;
 
-        if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&result.body) {
+        if let Ok(json) =
+            serde_json::from_slice::<serde_json::Value>(&result.body)
+        {
             let received = json["received_query"]
                 .as_str()
                 .unwrap_or("?");
+            
             let ok = received == data;
+            
             println!("{:.<25} {}", name, if ok { "OK" } else { "MISMATCH" });
         } else {
             println!("{:.<25} {}", name, result.status);
@@ -54,12 +65,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     println!("\nPOST with UTF-8 JSON:");
+
     let json_body = r#"{"message":"Привет, мир! 🌍","chinese":"你好世界"}"#;
+
     let exec = WebRequest::post()
         .with_content_type("application/json")
         .with_body(json_body.as_bytes().to_vec())
         .build(&script)?;
+
     let result = sapi.execute(exec)?;
+
     println!(
         "  Status: {} (body: {} bytes)",
         result.status,

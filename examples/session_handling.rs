@@ -22,10 +22,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let session_cookie = result1
         .headers
         .iter()
-        .find(|(n, _)| n.eq_ignore_ascii_case("Set-Cookie"))
-        .and_then(|(_, v)| {
-            if v.starts_with("PHPSESSID=") {
-                v.split(';').next().map(|s| s.to_string())
+        .find(|h| h.name().eq_ignore_ascii_case("Set-Cookie"))
+        .and_then(|h| {
+            if h.value().starts_with("PHPSESSID=") {
+                h.value().split(';').next().map(|s| s.to_string())
             } else {
                 None
             }

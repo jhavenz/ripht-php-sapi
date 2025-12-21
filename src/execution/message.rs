@@ -1,3 +1,4 @@
+/// PHP error severity levels (maps to syslog priorities).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyslogLevel {
     Emergency = 0,
@@ -69,6 +70,7 @@ impl From<SyslogLevel> for i32 {
     }
 }
 
+/// A PHP error, warning, or notice captured during execution.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct ExecutionMessage {

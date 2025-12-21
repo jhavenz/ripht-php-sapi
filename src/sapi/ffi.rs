@@ -1,3 +1,8 @@
+//! Raw PHP C API bindings.
+//!
+//! Contains struct definitions and extern declarations matching PHP's headers.
+//! Users shouldn't need to interact with this module directly.
+
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
 

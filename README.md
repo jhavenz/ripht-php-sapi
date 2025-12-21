@@ -4,8 +4,6 @@ Safe, pragmatic Rust bindings to PHP's Server API (SAPI) for embedding PHP into 
 
 The goal: provide a convenience layer to encourage development of additional Rust tooling for PHP.
 
-Status: WIP — this crate is not yet released; I'm very close as of 2025-12-16
-
 ## Requirements
 
 This crate requires PHP built with the embed SAPI as a static library:
@@ -16,6 +14,7 @@ make && make install
 ```
 
 Set `RIPHT_PHP_SAPI_PREFIX` to your PHP installation root containing:
+
 - `lib/libphp.a` (PHP embed SAPI)
 - `include/php/` (PHP headers)
 
@@ -25,7 +24,12 @@ Or install to one of the default fallback locations: `~/.ripht/php`, `~/.local/p
 
 ## Quick start
 
-Add the crate to your project (when released) or use it locally as a path/git dependency while developing.
+Add the crate to your `Cargo.toml`:
+
+```toml
+[dependencies]
+ripht-php-sapi = "0.1.0-rc.1"
+```
 
 Example usage:
 
@@ -43,24 +47,24 @@ assert_eq!(res.status, 200);
 println!("{}", String::from_utf8_lossy(&res.body));
 ```
 
-You only write safe Rust and don't have to worry about the low-level SAPI details. 
+You only write safe Rust and don't have to worry about the low-level SAPI details.
 
 Here's a minimal example that uses a single hook callback to stream output as it arrives:
+
 ```rust
 use ripht_php_sapi::{RiphtSapi, WebRequest, ExecutionHooks, OutputAction};
 
 struct StreamHooks;
 impl ExecutionHooks for StreamHooks {
     fn on_output(&mut self, data: &[u8]) -> OutputAction {
-        // PHP just wrote to the ouput buffer, do something use full here...
-        
+        // Do something with the PHP output here...
+
         OutputAction::Handled
     }
 }
 
 sapi.execute_with_hooks(ctx, StreamHooks).expect("execution failed");
 ```
-
 
 ## Development notes
 
@@ -72,9 +76,10 @@ sapi.execute_with_hooks(ctx, StreamHooks).expect("execution failed");
 cargo bench --bench sapi_comparison
 ```
 
-To compare against external servers (php-fpm/FrankenPHP), set environment variables before running the bench, e.g.: 
+To compare against external servers (php-fpm/FrankenPHP), set environment variables before running the bench, e.g.:
 
 _Note: you'll need to have the frankenphp and php-fpm builds setup before running this. Reach out if you have questions_
+
 ```bash
 BENCH_COMPARE=1 \
     BENCH_FPM_BIN=/path/to/php-fpm \
@@ -84,12 +89,28 @@ BENCH_COMPARE=1 \
 
 ## Examples
 
-- See `examples/` and `tests/php_scripts/` for sample usage and test scripts.
+See `examples/` and `tests/php_scripts/` for sample usage and test scripts.
+
+## Support
+
+I have plans to do much more, this crate serves as the foundation of a larger toolchain I have in mind. I'd love to do it full time. 
+
+Your support on [Patreon](https://patreon.com/jhavenz) would be greatly appreciated.
+
+Provide feedback on additional PHP SAPI learning material [here](https://www.patreon.com/posts/gauging-php-sapi-146489023)
+
+## Learning Material
+
+Building this SAPI required diving deep into PHP internals, Rust FFI, and the patterns that connect them. I'm working on educational material to share what I've discovered along the way.
+
+See the summary I've put together [here](docs/leanpub/summary.md). This is the intro for a book I'm planning to put together on Leanpub. I'll be writing the initial chapters and a couple pages of each chapter to publish to get a feel for public interest on this.
+
+Feel free to get involved in the discussions portion of this repo with regards to this.
 
 ## Contributing
 
-This project is experimental. If you'd like to help, open an issue or a PR — small, focused changes are appreciated.
+If you'd like to help, open an issue or a PR — small, focused changes are appreciated.
 
 ## License
 
-Apache-2.0
+MIT

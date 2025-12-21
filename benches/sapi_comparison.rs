@@ -26,19 +26,19 @@ mod support;
 
 static NEXT_PORT: AtomicU16 = AtomicU16::new(19000);
 
-fn bench_hello_world(c: &mut Criterion) {
-    // If running in worker mode, execute worker loop and exit this process.
+fn bench_api(c: &mut Criterion) {
     support::worker::maybe_run_worker();
+
     let compare = should_compare();
     let fpm_mode = fpm_only();
     let franken_mode = frankenphp_only();
 
-    let mut group = c.benchmark_group("hello_world");
+    let mut group = c.benchmark_group("api");
     group.throughput(Throughput::Elements(1));
 
     if !fpm_mode && !franken_mode {
         let sapi = RiphtSapi::instance();
-        let script = php_script_path("hello.php");
+        let script = php_script_path("api.php");
 
         let exec = WebRequest::get()
             .build(&script)
@@ -57,7 +57,7 @@ fn bench_hello_world(c: &mut Criterion) {
     if compare || fpm_mode {
         if let Some(fpm) = FpmServer::start() {
             group.bench_function("php_fpm", |b| {
-                b.iter(|| black_box(fpm.execute("hello.php", "GET", None)))
+                b.iter(|| black_box(fpm.execute("api.php", "GET", None)))
             });
         } else {
             eprintln!("Skipping php-fpm benchmark (server failed to start)");
@@ -67,7 +67,7 @@ fn bench_hello_world(c: &mut Criterion) {
     if compare || franken_mode {
         if let Some(franken) = FrankenPhpServer::start() {
             group.bench_function("frankenphp", |b| {
-                b.iter(|| black_box(franken.execute("hello.php", "GET", None)))
+                b.iter(|| black_box(franken.execute("api.php", "GET", None)))
             });
         } else {
             eprintln!("Skipping FrankenPHP benchmark (server failed to start)");
@@ -76,15 +76,14 @@ fn bench_hello_world(c: &mut Criterion) {
 
     group.finish();
 
-    // Pooled (process) benchmark — minimal production-like worker pool
-    let mut group_pool = c.benchmark_group("hello_world_pooled");
+    let mut group_pool = c.benchmark_group("api_pooled");
     group_pool.throughput(Throughput::Elements(1));
     {
         let workers = support::workers_from_env();
         let mut pool = support::Pool::new(workers);
         let req = support::Exec {
             method: 0, // GET
-            script: php_script_path("hello.php")
+            script: php_script_path("api.php")
                 .to_string_lossy()
                 .into_owned(),
             uri: None,
@@ -317,7 +316,7 @@ fn bench_ipc_echo(c: &mut Criterion) {
 
 criterion_group!(
     benches,
-    bench_hello_world,
+    bench_api,
     bench_json_api,
     bench_post_json,
     bench_large_output,
@@ -589,28 +588,11 @@ impl FrankenPhpServer {
 
         let port = get_next_port();
 
-        let caddyfile_path =
-            std::env::temp_dir().join(format!("Caddyfile-bench-{}", port));
-        let caddyfile = format!(
-            r#"{{
-    admin off
-    auto_https off
-}}
-
-:{}  {{
-    root * {}
-    php
-}}
-"#,
-            port,
-            scripts_dir().display()
-        );
-        std::fs::write(&caddyfile_path, caddyfile).ok()?;
-
         let process = Command::new(&frankenphp_bin)
-            .arg("run")
-            .arg("--config")
-            .arg(&caddyfile_path)
+            .arg("php-server")
+            .arg("--listen")
+            .arg(format!(":{}", port))
+            .current_dir(scripts_dir())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
@@ -637,7 +619,7 @@ impl FrankenPhpServer {
         let mut stream =
             TcpStream::connect(format!("127.0.0.1:{}", self.port)).ok()?;
         stream
-            .set_read_timeout(Some(Duration::from_secs(5)))
+            .set_read_timeout(Some(Duration::from_secs(2)))
             .ok()?;
         stream
             .set_write_timeout(Some(Duration::from_secs(5)))
@@ -676,18 +658,77 @@ impl FrankenPhpServer {
                 .ok()?;
         }
 
+        // Read response - first get headers, then read exact Content-Length bytes
         let mut response = Vec::new();
-        stream
-            .read_to_end(&mut response)
-            .ok()?;
+        let mut buf = [0u8; 8192];
 
-        if let Some(header_end) = response
+        // Read until we find end of headers
+        loop {
+            match stream.read(&mut buf) {
+                Ok(0) => return None, // Connection closed before headers
+                Ok(n) => {
+                    response.extend_from_slice(&buf[..n]);
+                    if response
+                        .windows(4)
+                        .any(|w| w == b"\r\n\r\n")
+                    {
+                        break;
+                    }
+                }
+                Err(_) => return None,
+            }
+        }
+
+        // Parse headers to get Content-Length
+        let header_end = response
             .windows(4)
-            .position(|w| w == b"\r\n\r\n")
-        {
-            Some(response[header_end + 4..].to_vec())
+            .position(|w| w == b"\r\n\r\n")?;
+        let headers = std::str::from_utf8(&response[..header_end]).ok()?;
+        let content_length_opt = headers
+            .lines()
+            .find(|l| {
+                l.to_lowercase()
+                    .starts_with("content-length:")
+            })
+            .and_then(|l| {
+                l.split(':')
+                    .nth(1)?
+                    .trim()
+                    .parse::<usize>()
+                    .ok()
+            });
+
+        let body_start = header_end + 4;
+
+        if let Some(content_length) = content_length_opt {
+            // We have Content-Length, read exact number of bytes
+            let mut bytes_read = response.len() - body_start;
+
+            while bytes_read < content_length {
+                match stream.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        response.extend_from_slice(&buf[..n]);
+                        bytes_read += n;
+                    }
+                    Err(_) => break,
+                }
+            }
+            Some(
+                response
+                    [body_start..body_start + content_length.min(bytes_read)]
+                    .to_vec(),
+            )
         } else {
-            Some(response)
+            // No Content-Length, read until connection closes (Connection: close)
+            loop {
+                match stream.read(&mut buf) {
+                    Ok(0) => break, // Connection closed
+                    Ok(n) => response.extend_from_slice(&buf[..n]),
+                    Err(_) => break,
+                }
+            }
+            Some(response[body_start..].to_vec())
         }
     }
 }

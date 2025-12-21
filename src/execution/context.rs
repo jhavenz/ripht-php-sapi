@@ -5,6 +5,10 @@ use std::path::PathBuf;
 use crate::sapi::ServerVars;
 use crate::ExecutionError;
 
+/// Parameters for PHP script execution.
+///
+/// Use the builder methods to configure the script path, server variables,
+/// POST body, environment variables, and INI overrides.
 #[derive(Debug, Clone)]
 pub struct ExecutionContext {
     pub input: Vec<u8>,
@@ -12,6 +16,7 @@ pub struct ExecutionContext {
     pub server_vars: ServerVars,
     pub env_vars: Vec<(String, String)>,
     pub ini_overrides: Vec<(String, String)>,
+    pub log_to_stderr: bool,
 }
 
 impl ExecutionContext {
@@ -22,11 +27,17 @@ impl ExecutionContext {
             server_vars: ServerVars::new(),
             env_vars: Vec::new(),
             ini_overrides: Vec::new(),
+            log_to_stderr: false,
         }
     }
 
-    pub fn var(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.server_vars.set(key, value);
+    pub fn var(
+        mut self,
+        key: impl Into<String>,
+        value: impl Into<String>,
+    ) -> Self {
+        self.server_vars
+            .set(key, value);
         self
     }
 
@@ -45,8 +56,13 @@ impl ExecutionContext {
         self
     }
 
-    pub fn env(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.env_vars.push((key.into(), value.into()));
+    pub fn env(
+        mut self,
+        key: impl Into<String>,
+        value: impl Into<String>,
+    ) -> Self {
+        self.env_vars
+            .push((key.into(), value.into()));
         self
     }
 
@@ -56,20 +72,30 @@ impl ExecutionContext {
         K: Into<String>,
         V: Into<String>,
     {
-        self.env_vars
-            .extend(iter.into_iter().map(|(k, v)| (k.into(), v.into())));
+        self.env_vars.extend(
+            iter.into_iter()
+                .map(|(k, v)| (k.into(), v.into())),
+        );
         self
     }
 
-    pub fn ini(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.ini_overrides.push((key.into(), value.into()));
+    pub fn ini(
+        mut self,
+        key: impl Into<String>,
+        value: impl Into<String>,
+    ) -> Self {
+        self.ini_overrides
+            .push((key.into(), value.into()));
         self
     }
 
     pub fn path_as_cstring(&self) -> Result<CString, ExecutionError> {
-        let path_str = self.script_path.to_string_lossy();
-        CString::new(path_str.as_bytes())
-            .map_err(|_| ExecutionError::InvalidPath("Path contains null byte".to_string()))
+        let path_str = self
+            .script_path
+            .to_string_lossy();
+        CString::new(path_str.as_bytes()).map_err(|_| {
+            ExecutionError::InvalidPath("Path contains null byte".to_string())
+        })
     }
 }
 
@@ -85,8 +111,12 @@ impl fmt::Display for ExecutionContext {
             writeln!(f, "  server_vars: [")?;
 
             let display_count = var_count.min(15);
-            for (key, value) in self.server_vars.iter().take(display_count) {
-                let escaped_value = escape_non_utf8(value);
+            for (key, value) in self
+                .server_vars
+                .iter()
+                .take(display_count)
+            {
+                let escaped_value = escape_control_chars(value);
                 let truncated = if escaped_value.len() > 60 {
                     format!("{}...", &escaped_value[..57])
                 } else {
@@ -106,7 +136,7 @@ impl fmt::Display for ExecutionContext {
     }
 }
 
-fn escape_non_utf8(s: &str) -> String {
+fn escape_control_chars(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     for c in s.chars() {
         if c.is_control() && c != '\t' && c != '\n' {

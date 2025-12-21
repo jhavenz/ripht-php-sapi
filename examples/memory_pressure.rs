@@ -16,11 +16,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let cases = [
         ("Baseline", "action=report"),
-        ("5000 strings (~5MB)", "action=allocate&size=5000"),
-        ("5000 objects", "action=objects&size=5000"),
-        ("100-level recursion", "action=recursive&size=100"),
-        ("10000 strings (~10MB)", "action=allocate&size=10000"),
         ("Post-stress baseline", "action=report"),
+        ("100-level recursion", "action=recursive&size=100"),
+        ("5000 objects", "action=objects&size=5000"),
+        ("5000 strings (~5MB)", "action=allocate&size=5000"),
+        ("10000 strings (~10MB)", "action=allocate&size=10000"),
     ];
 
     for (name, query) in cases {
@@ -35,6 +35,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .unwrap_or(0) as f64
                 / 1024.0
                 / 1024.0;
+
             println!("{:.<30} peak={:.1}MB", name, peak);
         } else {
             println!("{:.<30} {}", name, result.status);
@@ -42,6 +43,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     println!("\nRepeated allocation cycles:");
+    
     for i in 1..=3 {
         let exec = WebRequest::get()
             .with_uri("/?action=allocate&size=3000")
@@ -54,6 +56,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .unwrap_or(0) as f64
                 / 1024.0
                 / 1024.0;
+
             println!("  Cycle {}: peak={:.1}MB", i, peak);
         }
     }

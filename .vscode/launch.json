@@ -241,7 +241,7 @@
         "post_json",
         "session_handling",
         "streaming_output",
-        "encoding_guanlet"
+        "encoding_gaunlet"
       ]
     }
   ]

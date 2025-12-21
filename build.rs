@@ -17,8 +17,6 @@
 //! - `/usr/local` (system location)
 //!
 //! # Building PHP
-//!
-//! PHP must be built with the embed SAPI as a static library:
 //! ```sh
 //! ./configure --enable-embed=static --disable-zts [other options...]
 //! make && make install INSTALL_ROOT=/path/to/prefix
@@ -53,7 +51,7 @@ fn main() {
         )
     });
 
-    println!("cargo:warning=Using PHP prefix: {}", prefix.display());
+    println!("Using PHP prefix: {}", prefix.display());
 
     let lib_dir = prefix.join("lib");
     if lib_dir.exists() {
@@ -70,7 +68,7 @@ fn main() {
     }
 
     println!("cargo:rustc-link-lib=static=php");
-    println!("cargo:warning=Linking against: {}", libphp_path.display());
+    println!("Linking against: {}", libphp_path.display());
 
     link_php_dependencies(&lib_dir);
     link_platform_libraries();
@@ -78,24 +76,19 @@ fn main() {
 }
 
 fn find_php_prefix() -> Option<PathBuf> {
-    // Primary: explicit environment variable
     if let Ok(prefix) = env::var("RIPHT_PHP_SAPI_PREFIX") {
         let path = PathBuf::from(&prefix);
         if validate_php_prefix(&path) {
             return Some(path);
         }
-        println!(
-            "cargo:warning=RIPHT_PHP_SAPI_PREFIX set but invalid: {}",
-            prefix
-        );
+        println!("RIPHT_PHP_SAPI_PREFIX set but invalid: {}", prefix);
     }
 
-    // Fallback: check common locations (developer convenience)
     let home = env::var("HOME").unwrap_or_else(|_| String::from("/root"));
     let candidates = [
-        format!("{}/.ripht/php", home), // Project-recommended location
-        format!("{}/.local/php", home), // Common user install location
-        "/usr/local".to_string(),       // System location
+        format!("{}/.ripht/php", home),
+        format!("{}/.local/php", home),
+        "/usr/local".to_string(),      
     ];
 
     for candidate in &candidates {
@@ -117,15 +110,15 @@ fn validate_php_prefix(prefix: &Path) -> bool {
 }
 
 fn link_php_dependencies(lib_dir: &Path) {
-    let core_libs = ["charset", "iconv", "z"];
-    let ssl_libs = ["crypto", "ssl"];
-    let network_libs = ["curl"];
     let xml_libs = ["xml2"];
-    let archive_libs = ["bz2", "zip"];
-    let db_libs = ["sqlite3", "pgcommon", "pgport", "pq"];
-    let image_libs = ["png16", "png"];
+    let network_libs = ["curl"];
     let text_libs = ["onig", "gmp"];
+    let ssl_libs = ["crypto", "ssl"];
+    let archive_libs = ["bz2", "zip"];
+    let image_libs = ["png16", "png"];
     let terminal_libs = ["ncurses", "edit"];
+    let core_libs = ["charset", "iconv", "z"];
+    let db_libs = ["sqlite3", "pgcommon", "pgport", "pq"];
     let icu_libs = ["icudata", "icuuc", "icuio", "icutu", "icui18n"];
 
     for lib in core_libs
@@ -253,7 +246,7 @@ fn generate_bindgen_validation(php_prefix: &Path) {
             b.write_to_file(&output_path)
                 .expect("Failed to write bindgen validation output");
             println!(
-                "cargo:warning=Generated bindgen validation at {}",
+                "Generated bindgen validation at {}",
                 output_path.display()
             );
             println!("cargo:rustc-cfg=bindgen_available");

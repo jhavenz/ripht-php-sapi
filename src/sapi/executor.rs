@@ -1,18 +1,24 @@
-use std::ffi::CString;
+//! Request execution engine.
+//!
+//! Manages the PHP request lifecycle: startup, script execution, and shutdown.
 
 use std::any::TypeId;
+use std::ffi::CString;
+
 use thiserror::Error;
 
 #[cfg(feature = "tracing")]
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, trace};
 
 use super::ffi;
 use super::server_context::ServerContext;
 use super::SapiError;
 use crate::execution::{
     ExecutionContext, ExecutionHooks, ExecutionResult, NoOpHooks, OutputAction,
+    ResponseHeader,
 };
 
+/// Errors that can occur during PHP script execution.
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum ExecutionError {
@@ -29,6 +35,7 @@ pub enum ExecutionError {
     StartupFailed,
 }
 
+/// Executes PHP scripts within an initialized SAPI.
 pub struct Executor<'sapi> {
     sapi: &'sapi super::RiphtSapi,
 }
@@ -80,10 +87,12 @@ impl<'sapi> Executor<'sapi> {
         let mut server_ctx = Box::<ServerContext>::from(ctx);
         server_ctx.set_output_callback(on_output);
 
+        // SAFETY: Ownership transfer for request execution. ServerContext is boxed,
+        // stored in sapi_globals.server_context, then reclaimed after php_request_shutdown.
+        // All error paths clean up properly.
         unsafe {
             let ctx_ptr = Box::into_raw(server_ctx);
             ffi::sapi_globals.server_context = ctx_ptr as *mut std::ffi::c_void;
-
             Self::setup_globals(&*ctx_ptr);
 
             if ffi::php_request_startup() == ffi::FAILURE {
@@ -94,29 +103,16 @@ impl<'sapi> Executor<'sapi> {
             }
 
             Self::apply_ini_overrides(&*ctx_ptr);
-
             Self::run_script(&script_cstr);
 
             ffi::sapi_globals.post_read = 1;
-
             ffi::php_request_shutdown(std::ptr::null_mut());
-
             ffi::sapi_globals.server_context = std::ptr::null_mut();
 
             let server_ctx = Box::from_raw(ctx_ptr);
-
             Self::cleanup_globals();
 
-            let result = ExecutionResult {
-                status: server_ctx.status_code,
-                headers: server_ctx
-                    .response_headers
-                    .clone(),
-                body: Vec::new(),
-                messages: server_ctx.messages,
-            };
-
-            Ok(result)
+            Ok((*server_ctx).into_result(Vec::new()))
         }
     }
 
@@ -150,10 +146,10 @@ impl<'sapi> Executor<'sapi> {
 
         let server_ctx = Box::<ServerContext>::from(ctx);
 
+        // SAFETY: Same ownership transfer pattern as execute_streaming.
         unsafe {
             let ctx_ptr = Box::into_raw(server_ctx);
             ffi::sapi_globals.server_context = ctx_ptr as *mut std::ffi::c_void;
-
             Self::setup_globals(&*ctx_ptr);
 
             hooks.on_request_starting();
@@ -181,7 +177,6 @@ impl<'sapi> Executor<'sapi> {
             trace!("Executing script");
 
             let exec_result = Self::run_script(&script_cstr);
-
             let success = exec_result != ffi::FAILURE;
             hooks.on_script_executed(success);
 
@@ -192,27 +187,27 @@ impl<'sapi> Executor<'sapi> {
 
             ffi::sapi_globals.post_read = 1;
             ffi::php_request_shutdown(std::ptr::null_mut());
-
             ffi::sapi_globals.server_context = std::ptr::null_mut();
 
             let mut server_ctx = Box::from_raw(ctx_ptr);
 
+            // SAFETY: Defensive cleanup of request-related pointers.
             Self::cleanup_globals();
 
-            let headers: Vec<(String, String)> =
+            let headers: Vec<ResponseHeader> =
                 if TypeId::of::<H>() == TypeId::of::<NoOpHooks>() {
-                    // Fast path: no filtering; move headers out without cloning
                     std::mem::take(&mut server_ctx.response_headers)
                 } else {
                     server_ctx
                         .response_headers
                         .iter()
-                        .filter(|(name, value)| hooks.on_header(name, value))
+                        .filter(|h| hooks.on_header(h.name(), h.value()))
                         .cloned()
                         .collect()
                 };
 
-            hooks.on_status(server_ctx.status_code);
+            let status = server_ctx.status_code();
+            hooks.on_status(status);
 
             for message in &server_ctx.messages {
                 hooks.on_php_message(message);
@@ -225,15 +220,16 @@ impl<'sapi> Executor<'sapi> {
 
             #[cfg(feature = "tracing")]
             debug!(
-                status = server_ctx.status_code,
+                status = status,
                 body_len = body.len(),
                 headers_count = headers.len(),
                 messages_count = server_ctx.messages.len(),
-                format!("Execution {}", if success { "succeeded" } else { "failed" })
+                "{}",
+                if success { "Execution succeeded" } else { "Execution failed" }
             );
 
             let result = ExecutionResult {
-                status: server_ctx.status_code,
+                status,
                 headers,
                 body,
                 messages: server_ctx.messages,
@@ -245,6 +241,7 @@ impl<'sapi> Executor<'sapi> {
         }
     }
 
+    /// Populates `sapi_globals.request_info` from the server context.
     unsafe fn setup_globals(ctx: &ServerContext) {
         ffi::sapi_globals
             .request_info
@@ -262,11 +259,13 @@ impl<'sapi> Executor<'sapi> {
             .request_info
             .query_string = ctx.query_string_ptr();
 
+        // Initialize response code to 200 (PHP default).
         ffi::sapi_globals
             .sapi_headers
             .http_response_code = 200;
     }
 
+    /// Runs the PHP script via `php_execute_script`.
     unsafe fn run_script(script_cstr: &CString) -> i32 {
         let mut file_handle = ffi::zend_file_handle::default();
         ffi::zend_stream_init_filename(&mut file_handle, script_cstr.as_ptr());
@@ -277,6 +276,7 @@ impl<'sapi> Executor<'sapi> {
         exec_result
     }
 
+    /// Clears request-related pointers to prevent stale access between requests.
     unsafe fn cleanup_globals() {
         ffi::sapi_globals.server_context = std::ptr::null_mut();
 
@@ -293,20 +293,26 @@ impl<'sapi> Executor<'sapi> {
             .cookie_data = std::ptr::null_mut();
     }
 
+    /// Applies per-request INI overrides from the server context.
     unsafe fn apply_ini_overrides(ctx: &ServerContext) {
         if ctx.ini_overrides.is_empty() {
             return;
         }
 
-        let init = ffi::zend_string_init_interned
-            .expect("null pointer - PHP may not be properly initialized");
+        let init = ffi::zend_string_init_interned.expect("PHP not initialized");
 
         for (key, value) in &ctx.ini_overrides {
+            // SAFETY: Create an interned zend_string for the INI key.
+            // CString::as_ptr() returns a valid null-terminated string.
             let name = init(key.as_ptr(), key.as_bytes().len(), true);
             if name.is_null() {
                 continue;
             }
 
+            // SAFETY: zend_alter_ini_entry_chars modifies PHP's INI settings.
+            // This is safe to call after php_request_startup().
+            // ZEND_INI_USER | ZEND_INI_SYSTEM allows changing most settings.
+            // ZEND_INI_STAGE_RUNTIME indicates we're in script execution.
             ffi::zend_alter_ini_entry_chars(
                 name,
                 value.as_ptr(),
