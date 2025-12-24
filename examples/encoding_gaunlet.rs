@@ -43,14 +43,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (name, data) in test_strings {
         let encoded = percent_encode(data);
         
-        let exec = WebRequest::get()
+        let req = WebRequest::get()
             .with_uri(format!("/?data={}", encoded))
             .build(&script)?;
         
-        let result = sapi.execute(exec)?;
+        let mut result = sapi.execute(req)?;
 
         if let Ok(json) =
-            serde_json::from_slice::<serde_json::Value>(&result.body)
+            serde_json::from_slice::<serde_json::Value>(&result.take_body())
         {
             let received = json["received_query"]
                 .as_str()
@@ -60,7 +60,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             
             println!("{:.<25} {}", name, if ok { "OK" } else { "MISMATCH" });
         } else {
-            println!("{:.<25} {}", name, result.status);
+            println!("{:.<25} {}", name, result.status_code());
         }
     }
 
@@ -68,17 +68,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let json_body = r#"{"message":"Привет, мир! 🌍","chinese":"你好世界"}"#;
 
-    let exec = WebRequest::post()
+    let req = WebRequest::post()
         .with_content_type("application/json")
         .with_body(json_body.as_bytes().to_vec())
         .build(&script)?;
 
-    let result = sapi.execute(exec)?;
+    let mut result = sapi.execute(req)?;
 
+    let body_len = result.body().len();
     println!(
         "  Status: {} (body: {} bytes)",
-        result.status,
-        result.body.len()
+        result.status_code(),
+        body_len
     );
 
     Ok(())

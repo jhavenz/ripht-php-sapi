@@ -8,14 +8,40 @@ use super::message::{ExecutionMessage, SyslogLevel};
 #[must_use]
 #[derive(Debug, Clone)]
 pub struct ExecutionResult {
-    pub status: u16,
-    pub body: Vec<u8>,
-    pub headers: Vec<ResponseHeader>,
-    pub messages: Vec<ExecutionMessage>,
+    status: u16,
+    body: Vec<u8>,
+    headers: Vec<ResponseHeader>,
+    messages: Vec<ExecutionMessage>,
 }
 
 impl ExecutionResult {
+    pub fn new(
+        status: u16,
+        body: Vec<u8>,
+        headers: Vec<ResponseHeader>,
+        messages: Vec<ExecutionMessage>,
+    ) -> Self {
+        Self {
+            status,
+            body,
+            headers,
+            messages,
+        }
+    }
+
+    pub fn body(&self) -> Vec<u8> {
+        self.body.to_owned()
+    }
+
+    pub fn take_body(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.body)
+    }
+
     pub fn body_string(&self) -> String {
+        if self.body.is_empty() {
+            return String::default();
+        }
+
         String::from_utf8_lossy(&self.body).into_owned()
     }
 
@@ -33,10 +59,10 @@ impl ExecutionResult {
             .any(|m| m.is_error())
     }
 
-    pub fn has_warnings(&self) -> bool {
+    pub fn has_message_level(&self, level: SyslogLevel) -> bool {
         self.messages
             .iter()
-            .any(|m| m.is_error() || m.level == SyslogLevel::Warning)
+            .any(|m| m.level == level)
     }
 
     pub fn errors(&self) -> impl Iterator<Item = &ExecutionMessage> {
@@ -49,7 +75,12 @@ impl ExecutionResult {
         self.messages.iter()
     }
 
-    pub fn header(&self, name: &str) -> Option<&str> {
+    pub fn all_headers(&self) -> impl Iterator<Item = &ResponseHeader> {
+        self.headers.iter()
+    }
+
+    /// Returns the first header value for a given header name, if any.
+    pub fn header_val(&self, name: &str) -> Option<&str> {
         self.headers
             .iter()
             .find(|h| {
@@ -59,7 +90,9 @@ impl ExecutionResult {
             .map(|h| h.value())
     }
 
-    pub fn headers_all(&self, name: &str) -> Vec<&str> {
+    /// Returns all headers for a given header name
+    /// e.g. "cookie" -> vec!["SESSID=abc123", "lang=en", "..."]
+    pub fn header_vals(&self, name: &str) -> Vec<&str> {
         self.headers
             .iter()
             .filter(|h| {

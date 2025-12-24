@@ -22,7 +22,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let result = sapi.execute_with_hooks(exec, ValidationHooks)?;
 
-    println!("Status: {}", result.status);
+    println!("Status: {}", result.status_code());
+    
     println!("\nOutput from PHP:");
     println!("{}", result.body_string());
 
@@ -42,7 +43,7 @@ impl ExecutionHooks for ValidationHooks {
 
     fn on_output(&mut self, data: &[u8]) -> OutputAction {
         println!("[Hook] Output received: {} bytes", data.len());
-        OutputAction::Buffer
+        OutputAction::Continue
     }
 
     fn on_status(&mut self, code: u16) {

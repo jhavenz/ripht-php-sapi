@@ -1,6 +1,6 @@
 [package]
 name = "ripht-php-sapi"
-version = "0.1.0-rc.2"
+version = "0.1.0-rc.4"
 edition = "2021"
 authors = ["Jonathan Havens <mail@jhavens.tech>"]
 repository = "https://github.com/jhavenz/ripht-php-sapi"
@@ -10,6 +10,7 @@ license = "MIT"
 keywords = ["php", "sapi", "ffi", "embed", "ripht"]
 categories = ["api-bindings", "web-programming"]
 readme = "README.md"
+documentation = "https://docs.rs/ripht-php-sapi"
 
 [dependencies]
 libc = "0.2"

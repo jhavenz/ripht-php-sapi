@@ -28,7 +28,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let result = sapi.execute_with_hooks(exec, hooks)?;
 
     println!("Execution complete!");
-    println!("Status: {}", result.status);
+    println!("Status: {}", result.status_code());
     println!("Body: {}", result.body_string());
 
     Ok(())
@@ -74,7 +74,7 @@ impl ExecutionHooks for LifecycleObserver {
 
     fn on_output(&mut self, data: &[u8]) -> OutputAction {
         self.log(&format!("on_output: {} bytes", data.len()));
-        OutputAction::Buffer
+        OutputAction::Continue
     }
 
     fn on_header(&mut self, name: &str, value: &str) -> bool {
@@ -100,8 +100,8 @@ impl ExecutionHooks for LifecycleObserver {
     fn on_request_finished(&mut self, result: &ExecutionResult) {
         self.log(&format!(
             "request_finished: status={}, body_len={}",
-            result.status,
-            result.body.len()
+            result.status_code(),
+            result.body().len()
         ));
     }
 }

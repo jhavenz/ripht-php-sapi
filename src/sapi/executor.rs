@@ -214,8 +214,8 @@ impl<'sapi> Executor<'sapi> {
             }
 
             let body = match hooks.on_output(&server_ctx.output_buffer) {
-                OutputAction::Buffer => server_ctx.output_buffer,
-                OutputAction::Handled => Vec::new(),
+                OutputAction::Continue => server_ctx.output_buffer,
+                OutputAction::Done => Vec::new(),
             };
 
             #[cfg(feature = "tracing")]
@@ -225,15 +225,19 @@ impl<'sapi> Executor<'sapi> {
                 headers_count = headers.len(),
                 messages_count = server_ctx.messages.len(),
                 "{}",
-                if success { "Execution succeeded" } else { "Execution failed" }
+                if success {
+                    "Execution succeeded"
+                } else {
+                    "Execution failed"
+                }
             );
 
-            let result = ExecutionResult {
+            let result = ExecutionResult::new(
                 status,
-                headers,
                 body,
-                messages: server_ctx.messages,
-            };
+                headers,
+                server_ctx.messages
+            );
 
             hooks.on_request_finished(&result);
 

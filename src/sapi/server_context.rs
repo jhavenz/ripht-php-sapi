@@ -238,12 +238,12 @@ impl ServerContext {
     }
 
     pub fn into_result(self, body: Vec<u8>) -> ExecutionResult {
-        ExecutionResult {
-            status: self.status_code.get(),
-            headers: self.response_headers,
+        ExecutionResult::new(
+            self.status_code.get(),
             body,
-            messages: self.messages,
-        }
+            self.response_headers,
+            self.messages,
+        )
     }
 }
 

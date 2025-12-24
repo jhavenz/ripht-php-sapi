@@ -21,11 +21,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let result = sapi.execute(exec)?;
 
-    if result.status == 200 {
+    if result.status_code() == 200 {
         println!("Form submitted successfully");
         println!("Response: {}", result.body_string());
     } else {
-        eprintln!("Request failed with status: {}", result.status);
+        eprintln!("Request failed with status: {}", result.status_code());
     }
 
     Ok(())

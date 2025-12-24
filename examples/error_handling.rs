@@ -16,7 +16,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let exec = WebRequest::get().build(&script_path)?;
     let result = sapi.execute(exec)?;
 
-    println!("Status: {}", result.status);
+    println!("Status: {}", result.status_code());
     println!("Body: {}", result.body_string());
 
     if result.has_errors() {
@@ -26,22 +26,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let warnings: Vec<_> = result
-        .messages
-        .iter()
+    let all_msgs = result.all_messages();
+    
+    let has_messages = result.all_messages().any(|_| true);
+    if !has_messages {
+        println!("\nNo PHP errors or warnings detected");
+    }
+
+    let warnings: Vec<_> = all_msgs
         .filter(|m| matches!(m.level, SyslogLevel::Warning))
         .collect();
 
-    if !warnings.is_empty() {
+     if !warnings.is_empty() {
         eprintln!("\nPHP Warnings:");
         for warning in warnings {
             eprintln!("  [{:?}] {}", warning.level, warning.message);
         }
     }
 
-    if result.messages.is_empty() {
-        println!("\nNo PHP errors or warnings detected");
-    }
+    
 
     Ok(())
 }

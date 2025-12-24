@@ -29,7 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .build(&script)?;
         let result = sapi.execute(exec)?;
 
-        if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&result.body) {
+        if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&result.body()) {
             let peak = json["peak_after"]
                 .as_u64()
                 .unwrap_or(0) as f64
@@ -38,7 +38,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             println!("{:.<30} peak={:.1}MB", name, peak);
         } else {
-            println!("{:.<30} {}", name, result.status);
+            println!("{:.<30} {}", name, result.status_code());
         }
     }
 
@@ -50,7 +50,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .build(&script)?;
         let result = sapi.execute(exec)?;
 
-        if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&result.body) {
+        if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&result.body()) {
             let peak = json["peak_after"]
                 .as_u64()
                 .unwrap_or(0) as f64

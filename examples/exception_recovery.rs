@@ -32,8 +32,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!(
             "{:.<30} {} ({})",
             name,
-            result.status,
-            if result.status == 200 { "OK" } else { "ERR" }
+            result.status_code(),
+            if result.status_code() == 200 { "OK" } else { "ERR" }
         );
     }
 
@@ -42,7 +42,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let result = sapi.execute(exec)?;
     println!(
         "  Post-error request: {} - {}",
-        result.status,
+        result.status_code(),
         result.body_string().trim()
     );
 

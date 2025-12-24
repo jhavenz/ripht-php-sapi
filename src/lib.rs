@@ -22,7 +22,7 @@
 //!     .expect("...");
 //!
 //! let result = php.execute(request).expect("execute");
-//! println!("Status: {}, Body: {}", result.status, result.body_string());
+//! println!("Status: {}, Body: {}", result.status_code(), result.body_string());
 //! ```
 
 #![allow(static_mut_refs)]

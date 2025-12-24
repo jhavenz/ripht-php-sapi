@@ -17,8 +17,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let result = sapi.execute(exec)?;
 
-    println!("Status: {}", result.status);
     println!("Body: {}", result.body_string());
+    println!("Status: {}", result.status_code());
 
     if result.has_errors() {
         eprintln!("PHP errors occurred:");

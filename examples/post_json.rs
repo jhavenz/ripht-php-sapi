@@ -26,14 +26,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let body = serde_json::to_vec(&data)?;
 
-    let exec = WebRequest::post()
+    let req = WebRequest::post()
         .with_content_type("application/json")
         .with_body(body)
         .build(&script_path)?;
 
-    let result = sapi.execute(exec)?;
+    let result = sapi.execute(req)?;
 
-    println!("Status: {}", result.status);
+    println!("Status: {}", result.status_code());
 
     if let Ok(json) = serde_json::from_str::<serde_json::Value>(&result.body_string()) {
         println!("Response:\n{}", serde_json::to_string_pretty(&json)?);

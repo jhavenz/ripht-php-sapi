@@ -38,12 +38,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let result = sapi.execute_with_hooks(exec, hooks)?;
 
     println!("\n--- Result ---");
-    println!("Status: {}", result.status);
+    println!("Status: {}", result.status_code());
     println!(
         "Body length: {} (empty because StreamingCallback returns Handled)",
-        result.body.len()
+        result.body().len()
     );
-    println!("Headers: {}", result.headers.len());
+    println!("Headers: {}", result.all_headers().count());
 
     Ok(())
 }

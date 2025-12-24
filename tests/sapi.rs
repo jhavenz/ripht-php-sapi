@@ -49,7 +49,7 @@ fn post_request_works() {
         .execute(exec)
         .expect("POST request execution failed");
 
-    assert_eq!(result.status, 200);
+    assert_eq!(result.status_code(), 200);
 
     let json: serde_json::Value = serde_json::from_str(&result.body_string())
         .expect("failed to parse response body as JSON");
@@ -72,7 +72,7 @@ fn stress_sequential_requests() {
             .execute(exec)
             .unwrap_or_else(|_| panic!("request {} execution failed", i));
 
-        assert_eq!(result.status, 200, "Request {} had non-200 status", i);
+        assert_eq!(result.status_code(), 200, "Request {} had non-200 status", i);
     }
 }
 
@@ -90,9 +90,9 @@ fn stress_large_output() {
         .expect("large output request execution failed");
 
     assert!(
-        result.body.len() >= 1024 * 1024,
+        result.body().len() >= 1024 * 1024,
         "Expected 1MB+ output, got {} bytes",
-        result.body.len()
+        result.body().len()
     );
 }
 
@@ -116,7 +116,7 @@ fn stress_mixed_methods() {
                     panic!("GET request {} execution failed", i)
                 });
 
-            assert_eq!(result.status, 200);
+            assert_eq!(result.status_code(), 200);
         } else {
             let exec = WebRequest::post()
                 .with_uri(format!("/post?i={}", i))
@@ -131,7 +131,7 @@ fn stress_mixed_methods() {
                     panic!("POST request {} execution failed", i)
                 });
 
-            assert_eq!(result.status, 200);
+            assert_eq!(result.status_code(), 200);
         }
     }
 }
@@ -153,7 +153,7 @@ fn test_context_isolation_between_requests() {
             .execute(exec)
             .unwrap_or_else(|_| panic!("request {} execution failed", i));
 
-        assert_eq!(result.status, 200);
+        assert_eq!(result.status_code(), 200);
 
         let json: serde_json::Value =
             serde_json::from_str(&result.body_string())
@@ -185,7 +185,7 @@ fn test_cstring_pointer_validity_during_execution() {
         .execute(exec)
         .expect("POST request execution failed");
 
-    assert_eq!(result.status, 200);
+    assert_eq!(result.status_code(), 200);
 }
 
 #[test]
@@ -209,7 +209,7 @@ fn test_post_data_bounds_with_real_script() {
                 panic!("request with {} bytes execution failed", size)
             });
 
-        assert_eq!(result.status, 200);
+        assert_eq!(result.status_code(), 200);
 
         let json: serde_json::Value =
             serde_json::from_str(&result.body_string())
@@ -239,9 +239,9 @@ fn test_header_parsing_with_real_php_headers() {
         .execute(exec)
         .expect("headers.php request execution failed");
 
-    assert_eq!(result.status, 200);
+    assert_eq!(result.status_code(), 200);
 
-    let content_type = result.header("Content-Type");
+    let content_type = result.header_val("Content-Type");
     if content_type.is_some() {
         assert_eq!(
             content_type,
@@ -251,17 +251,17 @@ fn test_header_parsing_with_real_php_headers() {
     }
 
     let has_custom_header = result
-        .header("X-Custom-Header")
+        .header_val("X-Custom-Header")
         .is_some()
         || result
-            .header("x-custom-header")
+            .header_val("x-custom-header")
             .is_some();
 
     if has_custom_header {
         assert_eq!(
             result
-                .header("X-Custom-Header")
-                .or_else(|| result.header("x-custom-header")),
+                .header_val("X-Custom-Header")
+                .or_else(|| result.header_val("x-custom-header")),
             Some("test-value"),
             "X-Custom-Header should be set if headers are captured"
         );
@@ -281,16 +281,15 @@ fn test_error_handling_with_errors_script() {
         .execute(exec)
         .expect("errors.php request execution failed");
 
-    assert_eq!(result.status, 200);
+    assert_eq!(result.status_code(), 200);
 
     assert!(
-        !result.messages.is_empty(),
+        result.all_messages().any(|_| true),
         "Response should contain messages from error_log() and trigger_error()"
     );
 
     let has_error = result
-        .messages
-        .iter()
+        .all_messages()
         .any(|e| {
             e.message
                 .contains("Sending an error log")
@@ -319,7 +318,7 @@ fn test_state_isolation_after_errors() {
         .execute(good_exec)
         .expect("request after error path should succeed");
 
-    assert_eq!(good_result.status, 200);
+    assert_eq!(good_result.status_code(), 200);
 }
 
 #[test]
@@ -340,7 +339,6 @@ fn test_file_not_found() {
 fn test_get_ini_display_errors() {
     let php = RiphtSapi::instance();
     let _ = php.set_ini("display_errors", "0");
-        
 
     assert_eq!(php.get_ini("display_errors"), Some("0".into()));
 }
@@ -436,7 +434,7 @@ test_value\r\n\
     let result = php
         .execute(exec)
         .expect("multipart POST request execution failed");
-    assert_eq!(result.status, 200);
+    assert_eq!(result.status_code(), 200);
 
     let body_str = result.body_string();
     let json: serde_json::Value = serde_json::from_str(&body_str)
@@ -492,9 +490,9 @@ A test file\r\n\
     let result = php
         .execute(exec)
         .expect("file upload request execution failed");
-    assert_eq!(result.status, 200);
+    assert_eq!(result.status_code(), 200);
 
-    let json: serde_json::Value = serde_json::from_slice(&result.body)
+    let json: serde_json::Value = serde_json::from_slice(&result.body())
         .expect("failed to parse response body as JSON");
 
     assert_eq!(
@@ -558,9 +556,9 @@ Content-Type: text/plain\r\n\
     let result = php
         .execute(exec)
         .expect("temp file upload request execution failed");
-    assert_eq!(result.status, 200);
+    assert_eq!(result.status_code(), 200);
 
-    let json: serde_json::Value = serde_json::from_slice(&result.body)
+    let json: serde_json::Value = serde_json::from_slice(&result.body())
         .expect("failed to parse response body as JSON");
 
     let upload_tmp_dir = json["upload_tmp_dir"]
@@ -619,7 +617,7 @@ fn test_session_basic() {
     let result1 = php
         .execute(exec1)
         .expect("first session request execution failed");
-    assert_eq!(result1.status, 200);
+    assert_eq!(result1.status_code(), 200);
 
     let body1 = result1.body_string();
     assert!(
@@ -635,8 +633,7 @@ fn test_session_basic() {
     );
 
     let session_cookie = result1
-        .headers
-        .iter()
+        .all_headers()
         .find(|h| {
             h.name()
                 .eq_ignore_ascii_case("Set-Cookie")
@@ -685,7 +682,7 @@ fn test_head_request_method() {
         .execute(exec)
         .expect("HEAD request execution failed");
 
-    assert_eq!(result.status, 200);
+    assert_eq!(result.status_code(), 200);
 }
 
 #[test]
@@ -699,7 +696,7 @@ fn test_options_request_method() {
     let result = php
         .execute(exec)
         .expect("OPTIONS request execution failed");
-    assert_eq!(result.status, 200);
+    assert_eq!(result.status_code(), 200);
 }
 
 #[test]
@@ -722,7 +719,7 @@ fn test_streaming_sse_output() {
         })
         .expect("SSE streaming request execution failed");
 
-    assert_eq!(result.status, 200);
+    assert_eq!(result.status_code(), 200);
 
     let received_chunks = chunks.lock().unwrap();
     assert!(
@@ -732,7 +729,7 @@ fn test_streaming_sse_output() {
     );
 
     assert!(
-        result.body.is_empty(),
+        result.body().is_empty(),
         "Response body should be empty when streaming (data sent to callback)"
     );
 
@@ -775,10 +772,10 @@ fn test_streaming_large_output() {
         })
         .expect("large output streaming request execution failed");
 
-    assert_eq!(result.status, 200);
+    assert_eq!(result.status_code(), 200);
 
     assert!(
-        result.body.is_empty(),
+        result.body().is_empty(),
         "Response body should be empty when streaming"
     );
 
@@ -807,9 +804,9 @@ fn test_streaming_large_output() {
         .execute(exec2)
         .expect("non-streaming large output request execution failed");
     assert!(
-        result2.body.len() >= 1024 * 1024,
+        result2.body().len() >= 1024 * 1024,
         "Non-streaming should buffer the full output: {} bytes",
-        result2.body.len()
+        result2.body().len()
     );
 }
 
@@ -831,7 +828,7 @@ fn test_header_edge_cases_duplicate_set_cookie_headers() {
         .execute(exec)
         .expect("header edge cases (duplicate) request execution failed");
 
-    let set_cookies = result.headers_all("Set-Cookie");
+    let set_cookies = result.header_vals("Set-Cookie");
     assert_eq!(
         set_cookies.len(),
         3,
@@ -866,13 +863,13 @@ fn test_header_edge_cases_header_remove() {
 
     assert!(
         result
-            .header("X-To-Remove")
+            .header_val("X-To-Remove")
             .is_none(),
         "X-To-Remove should not be present after header_remove()"
     );
 
     let kept = result
-        .header("X-Kept")
+        .header_val("X-Kept")
         .map(|v| v.contains("still here"))
         .unwrap_or(false);
     assert!(kept, "X-Kept should be present");
@@ -891,7 +888,7 @@ fn test_status_codes_and_redirect_location_header() {
     let result_201 = php
         .execute(exec_201)
         .expect("status_codes.php (201) request execution failed");
-    assert_eq!(result_201.status, 201);
+    assert_eq!(result_201.status_code(), 201);
 
     let exec_307 = WebRequest::get()
         .with_uri("/status_codes.php?code=307&method=header")
@@ -901,7 +898,7 @@ fn test_status_codes_and_redirect_location_header() {
     let result_307 = php
         .execute(exec_307)
         .expect("status_codes.php (307) request execution failed");
-    assert_eq!(result_307.status, 307);
+    assert_eq!(result_307.status_code(), 307);
 
     let redirect_script = php_script_path("redirect_handling.php");
     let exec_redirect = WebRequest::get()
@@ -913,10 +910,10 @@ fn test_status_codes_and_redirect_location_header() {
         .execute(exec_redirect)
         .expect("redirect_handling.php request execution failed");
 
-    assert_eq!(result_redirect.status, 301);
+    assert_eq!(result_redirect.status_code(), 301);
 
     let location = result_redirect
-        .header("Location")
+        .header_val("Location")
         .expect("redirect response missing Location header");
     assert!(
         location.contains("/redirected.php"),
@@ -938,10 +935,10 @@ fn test_binary_output_byte_integrity() {
         .execute(exec)
         .expect("binary output request execution failed");
 
-    assert_eq!(result.body.len(), 256, "Expected 256 bytes");
-    assert_eq!(result.body[0], 0);
-    assert_eq!(result.body[1], 1);
-    assert_eq!(result.body[255], 255);
+    assert_eq!(result.body().len(), 256, "Expected 256 bytes");
+    assert_eq!(result.body()[0], 0);
+    assert_eq!(result.body()[1], 1);
+    assert_eq!(result.body()[255], 255);
 }
 
 #[test]
@@ -968,7 +965,7 @@ fn test_webrequest_shaping_via_superglobals() {
         .execute(exec)
         .expect("superglobals.php request execution failed");
 
-    let json: serde_json::Value = serde_json::from_slice(&result.body)
+    let json: serde_json::Value = serde_json::from_slice(&result.body())
         .expect("failed to parse superglobals response as JSON");
 
     // Header mapping: X-Foo-Bar => HTTP_X_FOO_BAR => appears as X_FOO_BAR in HTTP_HEADERS
@@ -1008,7 +1005,7 @@ fn test_execute_with_hooks_can_filter_headers_and_handle_output() {
                 .lock()
                 .unwrap()
                 .extend_from_slice(data);
-            OutputAction::Handled
+            OutputAction::Done
         }
     }
 
@@ -1028,16 +1025,16 @@ fn test_execute_with_hooks_can_filter_headers_and_handle_output() {
         .expect("execute_with_hooks() failed");
 
     assert!(
-        result.body.is_empty(),
+        result.body().is_empty(),
         "Body should be empty when hooks handle output"
     );
 
     assert!(result
-        .header("X-Custom-Header")
+        .header_val("X-Custom-Header")
         .is_some());
     assert!(
         result
-            .header("X-Another-Header")
+            .header_val("X-Another-Header")
             .is_none(),
         "X-Another-Header should be filtered out by hooks"
     );
@@ -1068,7 +1065,7 @@ fn test_env_vars_visible_via_getenv() {
         .execute(exec)
         .expect("env_vars.php request execution failed");
 
-    let json: serde_json::Value = serde_json::from_slice(&result.body)
+    let json: serde_json::Value = serde_json::from_slice(&result.body())
         .expect("failed to parse env vars response as JSON");
 
     assert_eq!(json["TEST_ENV_KEY"], "hello-env");
@@ -1088,7 +1085,7 @@ fn test_request_scoped_ini_overrides_apply_and_do_not_leak() {
         .expect("ini_overrides.php baseline request execution failed");
 
     let base_json: serde_json::Value =
-        serde_json::from_slice(&base_result.body)
+        serde_json::from_slice(&base_result.body())
             .expect("failed to parse baseline INI response as JSON");
 
     let base_display_errors = base_json["display_errors"]
@@ -1112,7 +1109,7 @@ fn test_request_scoped_ini_overrides_apply_and_do_not_leak() {
         .execute(exec)
         .expect("ini_overrides.php override request execution failed");
 
-    let json: serde_json::Value = serde_json::from_slice(&result.body)
+    let json: serde_json::Value = serde_json::from_slice(&result.body())
         .expect("failed to parse INI override response as JSON");
 
     let got = json["display_errors"]
@@ -1138,7 +1135,7 @@ fn test_request_scoped_ini_overrides_apply_and_do_not_leak() {
         .expect("ini_overrides.php follow-up request execution failed");
 
     let after_json: serde_json::Value =
-        serde_json::from_slice(&after_result.body)
+        serde_json::from_slice(&after_result.body())
             .expect("failed to parse follow-up INI response as JSON");
 
     let after_display_errors = after_json["display_errors"]

@@ -4,8 +4,21 @@
 
 use std::path::PathBuf;
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{
+    black_box, criterion_group, criterion_main, Criterion, Throughput,
+};
 use ripht_php_sapi::{RiphtSapi, WebRequest};
+
+criterion_group!(
+    benches,
+    bench_simple_request,
+    bench_json_api,
+    bench_post_json,
+    bench_file_io,
+    bench_throughput,
+);
+
+criterion_main!(benches);
 
 fn php_script_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -22,7 +35,11 @@ fn bench_simple_request(c: &mut Criterion) {
             let exec = WebRequest::get()
                 .build(&script)
                 .expect("build failed");
-            black_box(sapi.execute(exec).expect("execution failed"))
+
+            black_box(
+                sapi.execute(exec)
+                    .expect("execution failed"),
+            )
         })
     });
 }
@@ -37,7 +54,11 @@ fn bench_json_api(c: &mut Criterion) {
                 .with_uri("/?action=status")
                 .build(&script)
                 .expect("build failed");
-            black_box(sapi.execute(exec).expect("execution failed"))
+
+            black_box(
+                sapi.execute(exec)
+                    .expect("execution failed"),
+            )
         })
     });
 }
@@ -54,7 +75,11 @@ fn bench_post_json(c: &mut Criterion) {
                 .with_body(body.as_bytes().to_vec())
                 .build(&script)
                 .expect("build failed");
-            black_box(sapi.execute(exec).expect("execution failed"))
+
+            black_box(
+                sapi.execute(exec)
+                    .expect("execution failed"),
+            )
         })
     });
 }
@@ -69,7 +94,11 @@ fn bench_file_io(c: &mut Criterion) {
                 .with_uri("/?action=readwrite")
                 .build(&script)
                 .expect("build failed");
-            black_box(sapi.execute(exec).expect("execution failed"))
+
+            black_box(
+                sapi.execute(exec)
+                    .expect("execution failed"),
+            )
         })
     });
 }
@@ -86,20 +115,13 @@ fn bench_throughput(c: &mut Criterion) {
             let exec = WebRequest::get()
                 .build(&script)
                 .expect("build failed");
-            black_box(sapi.execute(exec).expect("execution failed"))
+
+            black_box(
+                sapi.execute(exec)
+                    .expect("execution failed"),
+            )
         })
     });
 
     group.finish();
 }
-
-criterion_group!(
-    benches,
-    bench_simple_request,
-    bench_json_api,
-    bench_post_json,
-    bench_file_io,
-    bench_throughput,
-);
-
-criterion_main!(benches);

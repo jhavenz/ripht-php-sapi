@@ -48,13 +48,14 @@ pub mod worker {
         stdin: &mut dyn Read,
         stdout: &mut dyn Write,
     ) {
+        let body = read_vec(stdin);
+        let ct = read_string(stdin);
+        let uri = read_string(stdin);
         let method_id = read_u8(stdin);
         let script = read_string(stdin);
-        let uri = read_string(stdin);
-        let ct = read_string(stdin);
-        let body = read_vec(stdin);
 
         let script_path = PathBuf::from(script);
+
         let mut builder = match method_id {
             0 => WebRequest::get(),
             1 => WebRequest::post(),
@@ -65,12 +66,15 @@ pub mod worker {
             6 => WebRequest::options(),
             _ => WebRequest::get(),
         };
+
         if !uri.is_empty() {
             builder = builder.with_uri(uri);
         }
+
         if !ct.is_empty() {
             builder = builder.with_content_type(ct);
         }
+
         if !body.is_empty() {
             builder = builder.with_body(body);
         }
@@ -79,22 +83,28 @@ pub mod worker {
             match sapi.execute(ctx) {
                 Ok(result) => {
                     let _ = stdout.write_all(&[OP_EXEC_RESP]);
-                    write_u16(stdout, result.status);
-                    write_u32(stdout, result.body.len() as u32);
-                    let _ = stdout.write_all(&result.body);
+
+                    write_u16(stdout, result.status_code());
+                    write_u32(stdout, result.body().len() as u32);
+
+                    let _ = stdout.write_all(&result.body());
                     let _ = stdout.flush();
                 }
                 Err(_) => {
                     let _ = stdout.write_all(&[OP_EXEC_RESP]);
+
                     write_u16(stdout, 500);
                     write_u32(stdout, 0);
+
                     let _ = stdout.flush();
                 }
             }
         } else {
             let _ = stdout.write_all(&[OP_EXEC_RESP]);
+
             write_u16(stdout, 404);
             write_u32(stdout, 0);
+
             let _ = stdout.flush();
         }
     }
@@ -104,42 +114,54 @@ pub mod worker {
         let _ = stdout.write_all(&[OP_ECHO_RESP]);
         write_u32(stdout, len as u32);
 
-        // Stream zeroed bytes without heap alloc for large payloads
+        // Stream zeroed bytes w/out heap alloc for large payloads
         let mut remaining = len;
         let buf = [0u8; 8192];
+
         while remaining > 0 {
             let chunk = remaining.min(buf.len());
             let _ = stdout.write_all(&buf[..chunk]);
             remaining -= chunk;
         }
+
         let _ = stdout.flush();
     }
 
     fn read_u8(r: &mut dyn Read) -> u8 {
         let mut b = [0u8; 1];
         let _ = r.read_exact(&mut b);
+
         b[0]
     }
+
     fn read_u32(r: &mut dyn Read) -> u32 {
         let mut b = [0u8; 4];
         let _ = r.read_exact(&mut b);
+
         u32::from_le_bytes(b)
     }
+
     fn read_string(r: &mut dyn Read) -> String {
         let len = read_u32(r) as usize;
+
         if len == 0 {
             return String::new();
         }
+
         let mut v = vec![0u8; len];
         let _ = r.read_exact(&mut v);
+
         String::from_utf8(v).unwrap_or_default()
     }
+
     fn read_vec(r: &mut dyn Read) -> Vec<u8> {
         let len = read_u32(r) as usize;
         let mut v = vec![0u8; len];
+
         if len > 0 {
             let _ = r.read_exact(&mut v);
         }
+
         v
     }
 }
@@ -155,13 +177,16 @@ impl Pool {
         for _ in 0..n {
             workers.push(Proc::spawn());
         }
+
         Self { workers, next: 0 }
     }
 
     pub fn exec_request(&mut self, req: &Exec) -> ReplyMeta {
         let idx = self.next;
         let len = self.workers.len();
+
         self.next = (idx + 1) % len;
+
         let w = &mut self.workers[idx];
         w.send_exec(req);
         w.recv_exec()
@@ -170,7 +195,9 @@ impl Pool {
     pub fn echo(&mut self, body_len: usize) -> usize {
         let idx = self.next;
         let len = self.workers.len();
+
         self.next = (idx + 1) % len;
+
         let w = &mut self.workers[idx];
         w.send_echo(body_len);
         w.recv_echo()
@@ -186,6 +213,7 @@ struct Proc {
 impl Proc {
     fn spawn() -> Self {
         let exe = std::env::current_exe().expect("bench exe");
+
         let mut child = Command::new(exe)
             .env("SAPI_WORKER", "1")
             .stdin(Stdio::piped())
@@ -193,14 +221,17 @@ impl Proc {
             .stderr(Stdio::null())
             .spawn()
             .expect("spawn worker");
+
         let stdin = child
             .stdin
             .take()
             .expect("worker stdin");
+
         let stdout = child
             .stdout
             .take()
             .expect("worker stdout");
+
         Self {
             _child: child,
             stdin,
@@ -212,40 +243,51 @@ impl Proc {
         let _ = self
             .stdin
             .write_all(&[OP_EXEC]);
+
         self.stdin
             .write_all(&[req.method])
             .ok();
+
         write_string(&mut self.stdin, &req.script);
+
         write_string(
             &mut self.stdin,
             req.uri
                 .as_deref()
                 .unwrap_or(""),
         );
+
         write_string(
             &mut self.stdin,
             req.content_type
                 .as_deref()
                 .unwrap_or(""),
         );
+
         write_vec(
             &mut self.stdin,
             req.body
                 .as_deref()
                 .unwrap_or(&[]),
         );
+
         let _ = self.stdin.flush();
     }
 
     fn recv_exec(&mut self) -> ReplyMeta {
         let mut op = [0u8; 1];
+
         let _ = self
             .stdout
             .read_exact(&mut op);
+
         debug_assert_eq!(op[0], OP_EXEC_RESP);
+
         let status = read_u16(&mut self.stdout);
         let body_len = read_u32(&mut self.stdout) as usize;
+
         drain_body(&mut self.stdout, body_len);
+
         ReplyMeta {
             _status: status,
             body_len,
@@ -256,18 +298,24 @@ impl Proc {
         let _ = self
             .stdin
             .write_all(&[OP_ECHO]);
+
         write_u32(&mut self.stdin, body_len as u32);
+
         let _ = self.stdin.flush();
     }
 
     fn recv_echo(&mut self) -> usize {
         let mut op = [0u8; 1];
+
         let _ = self
             .stdout
             .read_exact(&mut op);
+
         debug_assert_eq!(op[0], OP_ECHO_RESP);
+
         let body_len = read_u32(&mut self.stdout) as usize;
         drain_body(&mut self.stdout, body_len);
+
         body_len
     }
 }
@@ -288,40 +336,51 @@ pub struct ReplyMeta {
 fn write_u16(w: &mut dyn Write, v: u16) {
     let _ = w.write_all(&v.to_le_bytes());
 }
+
 fn write_u32(w: &mut dyn Write, v: u32) {
     let _ = w.write_all(&v.to_le_bytes());
 }
+
 fn write_string(w: &mut dyn Write, s: &str) {
     write_u32(w, s.len() as u32);
     let _ = w.write_all(s.as_bytes());
 }
+
 fn write_vec(w: &mut dyn Write, v: &[u8]) {
     write_u32(w, v.len() as u32);
     if !v.is_empty() {
         let _ = w.write_all(v);
     }
 }
+
 fn read_u16(r: &mut dyn Read) -> u16 {
     let mut b = [0u8; 2];
     let _ = r.read_exact(&mut b);
     u16::from_le_bytes(b)
 }
+
 fn read_u32(r: &mut dyn Read) -> u32 {
     let mut b = [0u8; 4];
     let _ = r.read_exact(&mut b);
     u32::from_le_bytes(b)
 }
+
 fn drain_body(r: &mut dyn Read, len: usize) {
     let mut remaining = len;
+
     let mut buf = [0u8; 8192];
+
     while remaining > 0 {
         let to = remaining.min(buf.len());
+
         let n = r
             .read(&mut buf[..to])
             .unwrap_or(0);
+
         if n == 0 {
             break;
         };
+
         remaining -= n;
     }
 }

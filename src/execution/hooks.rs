@@ -3,22 +3,20 @@ use std::path::Path;
 use super::message::ExecutionMessage;
 use super::result::ExecutionResult;
 
-/// What to do with PHP output data.
+/// What to do with the PHP output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum OutputAction {
-    /// Accumulate in the result body.
-    Buffer,
-    /// Already handled (e.g., streamed to client).
-    Handled,
+    Continue,
+    Done,
 }
 
-/// No-op implementation of `ExecutionHooks`.
 pub struct NoOpHooks;
 
 impl ExecutionHooks for NoOpHooks {}
 
-/// Wraps a closure as an `ExecutionHooks` implementation for streaming output.
+/// Wraps a closure implementation for streaming output.
+/// Called at least once during execution.
 pub struct StreamingCallback<F> {
     output_fn: F,
 }
@@ -38,20 +36,18 @@ where
 {
     fn on_output(&mut self, data: &[u8]) -> OutputAction {
         (self.output_fn)(data);
-        OutputAction::Handled
+        OutputAction::Done
     }
 }
 
 /// Callbacks invoked during PHP request execution.
 ///
-/// All methods have default implementations that do nothing or return
-/// sensible defaults. Override only what you need.
+/// Default implementations allow for selective participation.
+/// Method names are purposefully self-explanatory/self-documenting.
 pub trait ExecutionHooks {
     /// Called after ServerContext is created.
     fn on_context_created(&mut self) {}
-    /// Called before php_request_startup.
     fn on_request_starting(&mut self) {}
-    /// Called after php_request_startup succeeds.
     fn on_request_started(&mut self) {}
 
     /// Called before script execution begins.
@@ -64,10 +60,11 @@ pub trait ExecutionHooks {
         let _ = success;
     }
 
-    /// Called when PHP writes output. Return `Handled` to suppress buffering.
+    /// Called when PHP writes to its output buffer.
     fn on_output(&mut self, data: &[u8]) -> OutputAction {
         let _ = data;
-        OutputAction::Buffer
+
+        OutputAction::Continue
     }
 
     /// Called when PHP flushes output.

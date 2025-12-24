@@ -45,11 +45,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let result = sapi.execute(exec)?;
 
-    if result.status == 200 {
+    if result.status_code() == 200 {
         println!("File uploaded successfully");
         println!("Response: {}", result.body_string());
     } else {
-        eprintln!("Upload failed with status: {}", result.status);
+        eprintln!("Upload failed with status: {}", result.status_code());
     }
 
     Ok(())

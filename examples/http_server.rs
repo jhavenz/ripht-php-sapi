@@ -37,14 +37,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         match php.execute(exec) {
             Ok(result) => {
-                let body = &result.body;
+                let body = result.body();
                 write!(
                     stream,
                     "HTTP/1.1 {}\r\nContent-Length: {}\r\n\r\n",
-                    result.status,
+                    result.status_code(),
                     body.len()
                 )?;
-                stream.write_all(body)?;
+                stream.write_all(&body)?;
             }
             Err(e) => {
                 write!(stream, "HTTP/1.1 500\r\n\r\nError: {}", e)?;

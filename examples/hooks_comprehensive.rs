@@ -30,11 +30,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("--- Lifecycle Events ---\n");
 
     let result = sapi.execute_with_hooks(exec, hooks)?;
+    let headers = result.all_headers();
 
     println!("\n--- Final Result ---\n");
-    println!("Status: {}", result.status);
-    println!("Headers ({}):", result.headers.len());
-    for header in &result.headers {
+    println!("Status: {}", result.status_code());
+    let headers_vec: Vec<_> = headers.collect();
+    println!("Headers ({}):", headers_vec.len());
+    for header in &headers_vec {
         println!("  {}: {}", header.name(), header.value());
     }
     println!("\nBody:\n{}", result.body_string());
@@ -112,7 +114,7 @@ impl ExecutionHooks for ComprehensiveHooks {
             ellipsis
         );
 
-        OutputAction::Buffer
+        OutputAction::Continue
     }
 
     fn on_flush(&mut self) {
@@ -187,10 +189,10 @@ impl ExecutionHooks for ComprehensiveHooks {
         println!(
             "[{:>6}μs] Request finished: status={}, body={} bytes, headers={}, messages={}",
             self.elapsed_ms(),
-            result.status,
-            result.body.len(),
-            result.headers.len(),
-            result.messages.len()
+            result.status_code(),
+            result.body().len(),
+            result.all_headers().count(),
+            result.all_messages().count()
         );
 
         if self.error_count > 0 || self.warning_count > 0 {

@@ -9,7 +9,6 @@ use std::path::PathBuf;
 
 use ripht_php_sapi::{ExecutionHooks, OutputAction, RiphtSapi, WebRequest};
 
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sapi = RiphtSapi::instance();
 
@@ -26,16 +25,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let result = sapi.execute_with_hooks(exec, hooks)?;
 
     println!("\nExecution complete!");
-    println!("Status: {}", result.status);
+    println!("Status: {}", result.status_code());
 
     println!(
         "Body (empty because we returned Handled): {} bytes",
-        result.body.len()
+        result.body().len()
     );
 
     Ok(())
 }
-
 
 struct OutputTransformer {
     captured_output: Vec<u8>,
@@ -59,7 +57,7 @@ impl ExecutionHooks for OutputTransformer {
         println!("[OutputTransformer] Original: {}", output_str.trim());
         println!("[OutputTransformer] Transformed: {}", transformed.trim());
 
-        OutputAction::Handled
+        OutputAction::Done
     }
 
     fn on_status(&mut self, code: u16) {

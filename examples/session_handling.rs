@@ -16,12 +16,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let exec1 = WebRequest::get().build(&script_path)?;
     let result1 = sapi.execute(exec1)?;
 
-    println!("First request - Status: {}", result1.status);
+    println!("First request - Status: {}", result1.status_code());
     println!("Response: {}", result1.body_string());
 
     let session_cookie = result1
-        .headers
-        .iter()
+        .all_headers()
         .find(|h| h.name().eq_ignore_ascii_case("Set-Cookie"))
         .and_then(|h| {
             if h.value().starts_with("PHPSESSID=") {
@@ -39,7 +38,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .build(&script_path)?;
 
         let result2 = sapi.execute(exec2)?;
-        println!("Second request - Status: {}", result2.status);
+        println!("Second request - Status: {}", result2.status_code());
         println!("Response: {}", result2.body_string());
     } else {
         eprintln!("No session cookie found in response");

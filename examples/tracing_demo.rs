@@ -30,7 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // - TRACE: Internal plumbing and data flow
     let result = sapi.execute(exec)?;
 
-    info!("Done. Status: {}", result.status);
+    info!("Done. Status: {}", result.status_code());
     
     Ok(())
 }

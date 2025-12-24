@@ -4,6 +4,7 @@ SAFETY.md
 target/
 .cargo/config.toml
 .cursor
+.cursorignore
 .refs/
 .cursorignore
 .deploy

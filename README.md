@@ -1,8 +1,17 @@
-# Ripht PHP SAPI
+# ripht-php-sapi
 
-Safe, pragmatic Rust bindings to PHP's Server API (SAPI) for embedding PHP into Rust applications.
+[![Crates.io](https://img.shields.io/crates/v/ripht-php-sapi)](https://crates.io/crates/ripht-php-sapi)
+[![docs.rs](https://docs.rs/ripht-php-sapi/badge.svg)](https://docs.rs/ripht-php-sapi)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-The goal: provide a convenience layer to encourage development of additional Rust tooling for PHP.
+Safe, pragmatic Rust bindings for embedding PHP via the embed SAPI.
+
+## Why ripht-php-sapi?
+1) Provide tooling that will allow additional PHP tooling to be built in Rust.
+
+2) I hadn't seen another Rust crate offering comparable features.
+
+3) I'm planning to build more tooling on this (stay tuned...).
 
 ## Requirements
 
@@ -19,8 +28,12 @@ Set `RIPHT_PHP_SAPI_PREFIX` to your PHP installation root containing:
 - `include/php/` (PHP headers)
 
 Or install to one of the default fallback locations: `~/.ripht/php`, `~/.local/php`, or `/usr/local`.
-
-> **Tip**: Tools like [Static PHP CLI](https://github.com/crazywhalecc/static-php-cli) can simplify building PHP with the embed SAPI. See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup options.
+    
+> Important Notes:
+> This crate is focuses on the non-ZTS build of PHP. 
+> There aren't currently plans to support ZTS builds.
+>
+> Tip: Tools like [Static PHP CLI](https://github.com/crazywhalecc/static-php-cli) can simplify building PHP with the embed SAPI. See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup options.
 
 ## Quick start
 
@@ -28,23 +41,54 @@ Add the crate to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-ripht-php-sapi = "0.1.0-rc.1"
+ripht-php-sapi = "0.1.0-rc.4"
 ```
 
 Example usage:
 
 For convenience, the crate provides a `prelude` module — import it with `use ripht_php_sapi::prelude::*;` to get commonly used types.
 
+### Web Example
+
+Simulate an HTTP request. This populates `$_GET`, `$_SERVER`, etc.
+
 ```rust
-use ripht_php_sapi::{RiphtSapi, WebRequest};
+use ripht_php_sapi::prelude::*;
 
 let sapi = RiphtSapi::instance();
-let script = std::path::Path::new("tests/php_scripts/hello.php");
-let req = WebRequest::get().build(&script).expect("build failed");
+let script = std::path::Path::new("index.php");
+
+let req = WebRequest::get()
+    .with_query_param("id", "123")
+    .with_header("User-Agent", "Ripht")
+    .build(&script)
+    .expect("build failed");
+
 let res = sapi.execute(req).expect("execution failed");
 
-assert_eq!(res.status, 200);
-println!("{}", String::from_utf8_lossy(&res.body));
+assert_eq!(res.status_code(), 200);
+println!("{}", res.body_string());
+```
+
+### CLI Example
+
+Run a script as if from the command line. This sets `argc`/`argv` and avoids HTTP superglobals.
+
+```rust
+use ripht_php_sapi::prelude::*;
+
+let sapi = RiphtSapi::instance();
+let script = std::path::Path::new("script.php");
+
+let req = CliRequest::new()
+    .with_arg("my-argument")
+    .with_env("MY_ENV_VAR", "value")
+    .build(&script)
+    .expect("build failed");
+
+let res = sapi.execute(req).expect("execution failed");
+
+println!("{}", res.body_string());
 ```
 
 You only write safe Rust and don't have to worry about the low-level SAPI details.
@@ -91,21 +135,10 @@ BENCH_COMPARE=1 \
 
 See `examples/` and `tests/php_scripts/` for sample usage and test scripts.
 
-## Support
-
-I have plans to do much more, this crate serves as the foundation of a larger toolchain I have in mind. I'd love to do it full time. 
-
-Your support on [Patreon](https://patreon.com/jhavenz) would be greatly appreciated.
-
-Provide feedback on additional PHP SAPI learning material [here](https://www.patreon.com/posts/gauging-php-sapi-146489023)
-
-## Learning Material
-
-Building this SAPI required diving deep into PHP internals, Rust FFI, and the patterns that connect them. I'm working on educational material to share what I've discovered along the way.
-
-See the summary I've put together [here](docs/leanpub/summary.md). This is the intro for a book I'm planning to put together on Leanpub. I'll be writing the initial chapters and a couple pages of each chapter to publish to get a feel for public interest on this.
-
-Feel free to get involved in the discussions portion of this repo with regards to this.
+## Support Development
+This project is part of a larger educational initiative about PHP internals and Rust FFI.
+- [Vote on educational content direction](https://www.patreon.com/posts/gauging-php-sapi-146489023)
+- [Support on Patreon](https://www.patreon.com/cw/jhavenz)
 
 ## Contributing
 

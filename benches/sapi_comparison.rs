@@ -43,9 +43,11 @@ fn bench_api(c: &mut Criterion) {
         let exec = WebRequest::get()
             .build(&script)
             .expect("build failed");
+
         group.bench_function("rust_sapi", |b| {
             b.iter(|| {
                 let ctx = black_box(exec.clone());
+
                 black_box(
                     sapi.execute(ctx)
                         .expect("execution failed"),
@@ -81,6 +83,7 @@ fn bench_api(c: &mut Criterion) {
     {
         let workers = support::workers_from_env();
         let mut pool = support::Pool::new(workers);
+
         let req = support::Exec {
             method: 0, // GET
             script: php_script_path("api.php")
@@ -90,9 +93,11 @@ fn bench_api(c: &mut Criterion) {
             content_type: None,
             body: None,
         };
+
         group_pool.bench_function("rust_sapi_pooled", |b| {
             b.iter(|| {
                 let meta = pool.exec_request(&req);
+
                 criterion::black_box(meta.body_len);
             })
         });
@@ -102,8 +107,9 @@ fn bench_api(c: &mut Criterion) {
 
 fn bench_json_api(c: &mut Criterion) {
     support::worker::maybe_run_worker();
-    let compare = should_compare();
+
     let fpm_mode = fpm_only();
+    let compare = should_compare();
     let franken_mode = frankenphp_only();
 
     let mut group = c.benchmark_group("json_api");
@@ -116,9 +122,11 @@ fn bench_json_api(c: &mut Criterion) {
         let exec = WebRequest::get()
             .build(&script)
             .expect("build failed");
+
         group.bench_function("rust_sapi", |b| {
             b.iter(|| {
                 let ctx = black_box(exec.clone());
+
                 black_box(
                     sapi.execute(ctx)
                         .expect("execution failed"),
@@ -150,6 +158,7 @@ fn bench_json_api(c: &mut Criterion) {
     {
         let workers = support::workers_from_env();
         let mut pool = support::Pool::new(workers);
+
         let req = support::Exec {
             method: 0, // GET
             script: php_script_path("api.php")
@@ -159,9 +168,11 @@ fn bench_json_api(c: &mut Criterion) {
             content_type: None,
             body: None,
         };
+
         group_pool.bench_function("rust_sapi_pooled", |b| {
             b.iter(|| {
                 let meta = pool.exec_request(&req);
+
                 criterion::black_box(meta.body_len);
             })
         });
@@ -171,8 +182,9 @@ fn bench_json_api(c: &mut Criterion) {
 
 fn bench_post_json(c: &mut Criterion) {
     support::worker::maybe_run_worker();
-    let compare = should_compare();
+
     let fpm_mode = fpm_only();
+    let compare = should_compare();
     let franken_mode = frankenphp_only();
 
     let mut group = c.benchmark_group("post_json");
@@ -189,11 +201,11 @@ fn bench_post_json(c: &mut Criterion) {
             .with_body(body.to_vec())
             .build(&script)
             .expect("build failed");
+
         group.bench_function("rust_sapi", |b| {
             b.iter(|| {
-                let ctx = black_box(exec.clone());
                 black_box(
-                    sapi.execute(ctx)
+                    sapi.execute(black_box(exec.clone()))
                         .expect("execution failed"),
                 )
             })
@@ -229,8 +241,9 @@ fn bench_post_json(c: &mut Criterion) {
 
 fn bench_large_output(c: &mut Criterion) {
     support::worker::maybe_run_worker();
-    let compare = should_compare();
+
     let fpm_mode = fpm_only();
+    let compare = should_compare();
     let franken_mode = frankenphp_only();
 
     let mut group = c.benchmark_group("large_output");
@@ -244,11 +257,11 @@ fn bench_large_output(c: &mut Criterion) {
             .with_uri("/?size=10000")
             .build(&script)
             .expect("build failed");
+
         group.bench_function("rust_sapi", |b| {
             b.iter(|| {
-                let ctx = black_box(exec.clone());
                 black_box(
-                    sapi.execute(ctx)
+                    sapi.execute(black_box(exec.clone()))
                         .expect("execution failed"),
                 )
             })
@@ -295,22 +308,18 @@ fn bench_ipc_echo(c: &mut Criterion) {
     let mut small = c.benchmark_group("ipc_echo_small");
     small.throughput(Throughput::Bytes(32));
     small.bench_function("pipe_binary", |b| {
-        b.iter(|| {
-            let n = pool.echo(32);
-            criterion::black_box(n);
-        })
+        b.iter(|| criterion::black_box(pool.echo(32)))
     });
+
     small.finish();
 
     let mut large = c.benchmark_group("ipc_echo_large");
     let size = 256 * 1024;
     large.throughput(Throughput::Bytes(size as u64));
     large.bench_function("pipe_binary", |b| {
-        b.iter(|| {
-            let n = pool.echo(size);
-            criterion::black_box(n);
-        })
+        b.iter(|| criterion::black_box(pool.echo(size)))
     });
+
     large.finish();
 }
 
@@ -342,9 +351,11 @@ fn scripts_dir() -> PathBuf {
 fn env_bin(var: &str) -> Option<PathBuf> {
     let value = std::env::var(var).ok()?;
     let value = value.trim();
+
     if value.is_empty() {
         return None;
     }
+
     let p = PathBuf::from(value);
     if p.exists() {
         Some(p)
@@ -363,12 +374,14 @@ struct FpmServer {
 impl FpmServer {
     fn start() -> Option<Self> {
         let fpm_bin = env_bin("BENCH_FPM_BIN")?;
+
         if !fpm_bin.exists() {
             eprintln!("php-fpm not found at {:?}", fpm_bin);
             return None;
         }
 
         let port = get_next_port();
+
         let socket_path =
             std::env::temp_dir().join(format!("php-fpm-bench-{}.sock", port));
 
@@ -376,6 +389,7 @@ impl FpmServer {
 
         let config_path =
             std::env::temp_dir().join(format!("php-fpm-bench-{}.conf", port));
+
         let config = format!(
             r#"[global]
 error_log = /dev/stderr
@@ -410,10 +424,12 @@ pm.max_children = 1
                     socket_path,
                 });
             }
+
             std::thread::sleep(Duration::from_millis(100));
         }
 
         eprintln!("php-fpm socket never appeared");
+
         None
     }
 
@@ -426,14 +442,17 @@ pm.max_children = 1
         use std::os::unix::net::UnixStream;
 
         let mut stream = UnixStream::connect(&self.socket_path).ok()?;
+
         stream
             .set_read_timeout(Some(Duration::from_secs(5)))
             .ok()?;
+
         stream
             .set_write_timeout(Some(Duration::from_secs(5)))
             .ok()?;
 
         let script_path = scripts_dir().join(script);
+
         let content_length = body
             .map(|b| b.len())
             .unwrap_or(0);
@@ -452,6 +471,7 @@ pm.max_children = 1
         ]);
 
         let request_id: u16 = 1;
+
         let mut request = Vec::new();
 
         request.extend_from_slice(&[
@@ -550,9 +570,9 @@ fn extract_fcgi_stdout(data: &[u8]) -> Option<Vec<u8>> {
     while pos + 8 <= data.len() {
         let _version = data[pos];
         let record_type = data[pos + 1];
+        let padding_length = data[pos + 6] as usize;
         let content_length =
             ((data[pos + 4] as usize) << 8) | (data[pos + 5] as usize);
-        let padding_length = data[pos + 6] as usize;
 
         pos += 8;
 
@@ -603,10 +623,12 @@ impl FrankenPhpServer {
                 std::thread::sleep(Duration::from_millis(50));
                 return Some(Self { process, port });
             }
+
             std::thread::sleep(Duration::from_millis(100));
         }
 
         eprintln!("FrankenPHP never started on port {}", port);
+
         None
     }
 
@@ -618,6 +640,7 @@ impl FrankenPhpServer {
     ) -> Option<Vec<u8>> {
         let mut stream =
             TcpStream::connect(format!("127.0.0.1:{}", self.port)).ok()?;
+
         stream
             .set_read_timeout(Some(Duration::from_secs(2)))
             .ok()?;
@@ -652,13 +675,14 @@ impl FrankenPhpServer {
         stream
             .write_all(request.as_bytes())
             .ok()?;
+
         if let Some(body_data) = body {
             stream
                 .write_all(body_data)
                 .ok()?;
         }
 
-        // Read response - first get headers, then read exact Content-Length bytes
+        // Read response - first get headers, then read exact content-length bytes
         let mut response = Vec::new();
         let mut buf = [0u8; 8192];
 
@@ -683,6 +707,7 @@ impl FrankenPhpServer {
         let header_end = response
             .windows(4)
             .position(|w| w == b"\r\n\r\n")?;
+
         let headers = std::str::from_utf8(&response[..header_end]).ok()?;
         let content_length_opt = headers
             .lines()
@@ -701,7 +726,6 @@ impl FrankenPhpServer {
         let body_start = header_end + 4;
 
         if let Some(content_length) = content_length_opt {
-            // We have Content-Length, read exact number of bytes
             let mut bytes_read = response.len() - body_start;
 
             while bytes_read < content_length {
@@ -720,7 +744,7 @@ impl FrankenPhpServer {
                     .to_vec(),
             )
         } else {
-            // No Content-Length, read until connection closes (Connection: close)
+            // No content-length, read until connection closes (Connection: close)
             loop {
                 match stream.read(&mut buf) {
                     Ok(0) => break, // Connection closed
