@@ -1,7 +1,7 @@
 //! Using the StreamingCallback helper for output handling with execute_with_hooks.
 //!
 //! `StreamingCallback` is a convenience wrapper that implements `ExecutionHooks`
-//! with a closure for `on_output`, returning `OutputAction::Handled`. This is
+//! with a closure for `on_output`, returning `OutputAction::Done`. This is
 //! useful when you only need to handle output but want to use `execute_with_hooks`
 //! for other hook functionality.
 //!

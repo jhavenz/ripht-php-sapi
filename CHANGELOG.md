@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.1.0-rc.4] - 2025-12-21
+## [0.1.0-rc.*] - 2025-12-21
 
 Initial release candidate.
 

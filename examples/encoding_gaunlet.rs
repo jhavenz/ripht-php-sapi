@@ -73,7 +73,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_body(json_body.as_bytes().to_vec())
         .build(&script)?;
 
-    let mut result = sapi.execute(req)?;
+    let result = sapi.execute(req)?;
 
     let body_len = result.body().len();
     println!(

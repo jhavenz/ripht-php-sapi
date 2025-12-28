@@ -103,7 +103,7 @@ impl ExecutionHooks for StreamHooks {
     fn on_output(&mut self, data: &[u8]) -> OutputAction {
         // Do something with the PHP output here...
 
-        OutputAction::Handled
+        OutputAction::Done
     }
 }
 

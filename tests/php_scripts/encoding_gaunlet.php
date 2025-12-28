@@ -11,11 +11,11 @@ $arabic = "\xD9\x85\xD8\xB1\xD8\xAD\xD8\xA8\xD8\xA7";
 $mixed_query = $_GET['data'] ?? '';
 
 echo json_encode([
-    'utf8' => $utf8_string,
     'emoji' => $emoji,
-    'special' => $special,
-    'cyrillic' => $cyrillic,
     'arabic' => $arabic,
+    'special' => $special,
+    'utf8' => $utf8_string,
+    'cyrillic' => $cyrillic,
     'received_query' => $mixed_query,
     'strlen_utf8' => strlen($utf8_string),
     'mb_strlen_utf8' => mb_strlen($utf8_string, 'UTF-8'),

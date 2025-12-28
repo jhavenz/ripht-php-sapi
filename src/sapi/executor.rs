@@ -263,7 +263,6 @@ impl<'sapi> Executor<'sapi> {
             .request_info
             .query_string = ctx.query_string_ptr();
 
-        // Initialize response code to 200 (PHP default).
         ffi::sapi_globals
             .sapi_headers
             .http_response_code = 200;

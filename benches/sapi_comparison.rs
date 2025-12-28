@@ -28,8 +28,8 @@ static NEXT_PORT: AtomicU16 = AtomicU16::new(19000);
 
 fn bench_api(c: &mut Criterion) {
     support::worker::maybe_run_worker();
-
     let compare = should_compare();
+
     let fpm_mode = fpm_only();
     let franken_mode = frankenphp_only();
 

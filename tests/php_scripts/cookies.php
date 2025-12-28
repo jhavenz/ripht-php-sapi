@@ -12,9 +12,9 @@ if (isset($_GET['set_cookie'])) {
 }
 
 $response = [
-    'method' => $_SERVER['REQUEST_METHOD'] ?? 'UNKNOWN',
     'cookies' => $_COOKIE,
     'cookie_count' => count($_COOKIE),
+    'method' => $_SERVER['REQUEST_METHOD'] ?? 'UNKNOWN',
 ];
 
 echo json_encode($response, JSON_PRETTY_PRINT);

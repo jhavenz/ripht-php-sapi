@@ -2,6 +2,9 @@ use std::ffi::CString;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// CGI/1.1 compliant server variables for PHP request execution.
+///
+/// Implements meta-variable semantics per [RFC 3875 §4.1](https://datatracker.ietf.org/doc/html/rfc3875#section-4.1).
 #[derive(Debug, Clone, Default)]
 pub struct ServerVars {
     cookie: Option<String>,
@@ -89,6 +92,7 @@ impl ServerVars {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default();
+
         self.set("REQUEST_TIME", now.as_secs().to_string())
             .set("REQUEST_TIME_FLOAT", now.as_secs_f64().to_string())
     }
@@ -106,7 +110,7 @@ impl ServerVars {
         self.set("DOCUMENT_ROOT", path.to_string_lossy())
     }
 
-    pub fn document_root_empty(&mut self) -> &mut Self {
+    pub fn set_empty_document_root(&mut self) -> &mut Self {
         self.set("DOCUMENT_ROOT", "")
     }
 
@@ -125,6 +129,9 @@ impl ServerVars {
         self.set("PATH_TRANSLATED", path.to_string_lossy())
     }
 
+    /// Sets `SERVER_NAME` meta-variable.
+    ///
+    /// Per [RFC 3875 §4.1.14](https://datatracker.ietf.org/doc/html/rfc3875#section-4.1.14).
     pub fn server_name(&mut self, name: &str) -> &mut Self {
         self.set("SERVER_NAME", name)
     }
@@ -137,6 +144,10 @@ impl ServerVars {
         self.set("SERVER_ADDR", addr)
     }
 
+    /// Sets `SERVER_PROTOCOL` meta-variable.
+    ///
+    /// Per [RFC 3875 §4.1.16](https://datatracker.ietf.org/doc/html/rfc3875#section-4.1.16),
+    /// format is `protocol/version` (e.g., `HTTP/1.1`).
     pub fn server_protocol(&mut self, proto: &str) -> &mut Self {
         self.set("SERVER_PROTOCOL", proto)
     }
@@ -145,6 +156,10 @@ impl ServerVars {
         self.set("SERVER_SOFTWARE", software)
     }
 
+    /// Sets `GATEWAY_INTERFACE` meta-variable.
+    ///
+    /// Per [RFC 3875 §4.1.4](https://datatracker.ietf.org/doc/html/rfc3875#section-4.1.4),
+    /// this identifies the CGI specification version (e.g., `CGI/1.1`).
     pub fn gateway_interface(&mut self, gi: &str) -> &mut Self {
         self.set("GATEWAY_INTERFACE", gi)
     }
@@ -170,6 +185,7 @@ impl ServerVars {
         let upper = name
             .to_uppercase()
             .replace('-', "_");
+
         match upper.as_str() {
             "CONTENT_TYPE" => self.set("CONTENT_TYPE", value),
             "CONTENT_LENGTH" => self.set("CONTENT_LENGTH", value),
@@ -201,17 +217,29 @@ impl ServerVars {
         self.set("PWD", path.to_string_lossy())
     }
 
+    /// Creates server variables with CGI/1.1 web defaults.
+    ///
+    /// Sets:
+    /// - `GATEWAY_INTERFACE` to `CGI/1.1` per [RFC 3875 §4.1.4](https://datatracker.ietf.org/doc/html/rfc3875#section-4.1.4)
+    /// - `REQUEST_TIME` and `REQUEST_TIME_FLOAT`
     pub fn web_defaults() -> Self {
         let mut vars = Self::with_capacity(24);
+
+        // RFC 3875 §4.1.4: GATEWAY_INTERFACE
+        // "The GATEWAY_INTERFACE variable MUST be set to the dialect of CGI
+        // being used by the server to communicate with the script."
         vars.gateway_interface("CGI/1.1")
             .request_time();
+
         vars
     }
 
     pub fn cli_defaults() -> Self {
         let mut vars = Self::with_capacity(12);
+        
         vars.request_time()
-            .document_root_empty();
+            .set_empty_document_root();
+
         vars
     }
 

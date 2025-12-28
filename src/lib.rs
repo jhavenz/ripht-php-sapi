@@ -55,11 +55,11 @@ pub mod prelude {
     pub use crate::{from_http_parts, from_http_request};
 }
 
-#[cfg(test)]
-use std::path::PathBuf;
-
 #[cfg(feature = "http")]
 pub use adapters::{from_http_parts, from_http_request};
+
+#[cfg(test)]
+use std::path::PathBuf;
 
 #[cfg(test)]
 pub fn php_script_path(name: &str) -> PathBuf {

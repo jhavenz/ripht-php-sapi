@@ -1,8 +1,14 @@
 
 [env]
+#### Build
+
+# Path to PHP build root containing lib/libphp.a (REQUIRED)
+# Set this to your PHP installation, or install to ~/.ripht/php, ~/.local/php, or /usr/local
+RIPHT_PHP_SAPI_PREFIX = "/path/to/php"
+
 #### Benchmarking 
 
-# /path/to/php-fpm (for BENCH_COMPARE)
+# /path/to/php-fpm
 #BENCH_FPM_BIN=
 
 # /path/to/frankenphp
@@ -27,14 +33,6 @@ SAPI_INIT_BUF = "65536"
 
 # x4 (default), x2, fixed32k
 SAPI_BUF_GROWTH = "x4"      
-
-#### Build/dev overrides (used by build.rs)
-# NOTE: Some variables (e.g., OUT_DIR, CARGO_*, etc.) are set by Cargo at build time
-# and are not included here.
-
-# Path to PHP build root containing lib/libphp.a (REQUIRED)
-# Set this to your PHP installation, or install to ~/.ripht/php, ~/.local/php, or /usr/local
-RIPHT_PHP_SAPI_PREFIX = "/path/to/php"
 
 #### Testing
 

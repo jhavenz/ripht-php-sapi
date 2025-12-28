@@ -2,6 +2,17 @@
 //!
 //! Handles module startup/shutdown (MINIT/MSHUTDOWN), callback registration,
 //! and provides the primary `RiphtSapi` interface for script execution.
+//! 
+//! Adheres to the Common Gateway Interface (CGI) Version 1.1 specification for environment variable semantics.
+//!
+//! ## Specification Compliance
+//!
+//! This SAPI implements CGI/1.1 meta-variable conventions as defined in:
+//! - [RFC 3875 - The Common Gateway Interface (CGI) Version 1.1](https://datatracker.ietf.org/doc/html/rfc3875)
+//!
+//! Specifically:
+//! - Section 4.1: Request Meta-Variables
+//! - Section 4.1.4: `GATEWAY_INTERFACE` set to `CGI/1.1`
 
 use std::ffi::CString;
 use std::sync::OnceLock;
@@ -26,7 +37,7 @@ static PHP_INIT_RESULT: OnceLock<Result<(), SapiError>> = OnceLock::new();
 
 pub(crate) static SAPI_NAME: &[u8] = b"ripht\0";
 pub(crate) static SAPI_PRETTY_NAME: &[u8] = b"Ripht PHP SAPI\0";
-pub(crate) static SERVER_SOFTWARE: &str = "Ripht/0.1.0-rc.1";
+pub(crate) static SERVER_SOFTWARE: &str = concat!("Ripht/", env!("CARGO_PKG_VERSION"));
 static INI_ENTRIES: &[u8] = b"\
 variables_order=EGPCS\n\
 request_order=GP\n\
