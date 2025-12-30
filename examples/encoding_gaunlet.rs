@@ -42,11 +42,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for (name, data) in test_strings {
         let encoded = percent_encode(data);
-        
+
         let req = WebRequest::get()
             .with_uri(format!("/?data={}", encoded))
             .build(&script)?;
-        
+
         let mut result = sapi.execute(req)?;
 
         if let Ok(json) =
@@ -55,9 +55,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let received = json["received_query"]
                 .as_str()
                 .unwrap_or("?");
-            
+
             let ok = received == data;
-            
+
             println!("{:.<25} {}", name, if ok { "OK" } else { "MISMATCH" });
         } else {
             println!("{:.<25} {}", name, result.status_code());

@@ -34,8 +34,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-
-
 struct LifecycleObserver {
     events: Vec<String>,
 }

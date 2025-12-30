@@ -27,8 +27,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let all_msgs = result.all_messages();
-    
-    let has_messages = result.all_messages().any(|_| true);
+
+    let has_messages = result
+        .all_messages()
+        .any(|_| true);
     if !has_messages {
         println!("\nNo PHP errors or warnings detected");
     }
@@ -37,14 +39,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .filter(|m| matches!(m.level, SyslogLevel::Warning))
         .collect();
 
-     if !warnings.is_empty() {
+    if !warnings.is_empty() {
         eprintln!("\nPHP Warnings:");
         for warning in warnings {
             eprintln!("  [{:?}] {}", warning.level, warning.message);
         }
     }
-
-    
 
     Ok(())
 }

@@ -11,7 +11,7 @@ switch ($format) {
         imagepng($img);
         imagedestroy($img);
         break;
-e
+        
     case 'null':
         header('Content-Type: application/octet-stream');
         echo "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09";

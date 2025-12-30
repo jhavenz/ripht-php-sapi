@@ -41,7 +41,7 @@ Add the crate to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-ripht-php-sapi = "0.1.0-rc.4"
+ripht-php-sapi = "0.1.0-rc.5"
 ```
 
 Example usage:
@@ -68,6 +68,33 @@ let res = sapi.execute(req).expect("execution failed");
 
 assert_eq!(res.status_code(), 200);
 println!("{}", res.body_string());
+```
+
+### PUT Method Example
+
+Use `WebRequest::new()` with any HTTP method. The `Method` enum implements `TryFrom<&str>`, making it easy to parse methods from incoming requests:
+
+```rust
+use ripht_php_sapi::prelude::*;
+
+let sapi = RiphtSapi::instance();
+let script = std::path::Path::new("api.php");
+
+let method_str = "pUt";
+let method = Method::try_from(method_str).expect("invalid method");
+
+let req = WebRequest::new(method)
+    .with_uri("/users/42")
+    .with_content_type("application/json")
+    .with_body(r#"{"name": "Alice", "email": "alice@example.com"}"#)
+    .with_header("Authorization", "Bearer token123")
+    .build(&script)
+    .expect("build failed");
+
+let res = sapi.execute(req).expect("execution failed");
+
+println!("Status: {}", res.status_code());
+println!("Response: {}", res.body_string());
 ```
 
 ### CLI Example
@@ -114,26 +141,57 @@ sapi.execute_with_hooks(ctx, StreamHooks).expect("execution failed");
 
 - The build script expects a PHP build root that contains `lib/libphp.a` (static embed SAPI) and headers. Set `RIPHT_PHP_SAPI_PREFIX` to point at your PHP build prefix if necessary.
 - Example debug/run helpers and bench configuration are in `.cargo/config.toml.example`.
-- Benchmarks use Criterion and live under `benches/`. Run them with:
 
+## Examples
+
+The crate includes comprehensive examples demonstrating various use cases:
+
+- [`basic_execution.rs`](examples/basic_execution.rs) - Simple GET request handling
+- [`env_and_ini.rs`](examples/env_and_ini.rs) - Environment variables and INI overrides
+- [`post_form.rs`](examples/post_form.rs) - Form data handling
+- [`post_json.rs`](examples/post_json.rs) - JSON request processing
+- [`file_upload.rs`](examples/file_upload.rs) - File upload handling
+- [`hooks_basic.rs`](examples/hooks_basic.rs) - Basic hook implementation
+- [`hooks_comprehensive.rs`](examples/hooks_comprehensive.rs) - Full hook lifecycle
+- [`hooks_output_handling.rs`](examples/hooks_output_handling.rs) - Output processing
+- [`hooks_streaming_callback.rs`](examples/hooks_streaming_callback.rs) - StreamingCallback helper
+- [`streaming_output.rs`](examples/streaming_output.rs) - Output streaming
+- [`session_handling.rs`](examples/session_handling.rs) - PHP sessions
+- [`http_server.rs`](examples/http_server.rs) - HTTP server integration
+- [`tracing_demo.rs`](examples/tracing_demo.rs) - Observability integration
+- [`error_handling.rs`](examples/error_handling.rs) - Error management
+- [`exception_recovery.rs`](examples/exception_recovery.rs) - Exception handling
+- [`memory_pressure.rs`](examples/memory_pressure.rs) - Memory usage testing
+- [`file_io.rs`](examples/file_io.rs) - File system operations
+- [`encoding_gaunlet.rs`](examples/encoding_gaunlet.rs) - Character encoding tests
+
+Run any example with:
 ```bash
-cargo bench --bench sapi_comparison
+cargo run --example <example_name>
 ```
 
-To compare against external servers (php-fpm/FrankenPHP), set environment variables before running the bench, e.g.:
+## Benchmarking
 
-_Note: you'll need to have the frankenphp and php-fpm builds setup before running this. Reach out if you have questions_
+Performance benchmarks are available in the `benches/` directory:
 
+- [`sapi_comparison.rs`](benches/sapi_comparison.rs) - Compare against php-fpm and FrankenPHP
+- [`throughput.rs`](benches/throughput.rs) - Request throughput testing
+
+### Standard Benchmarks
+
+Run benchmarks with:
 ```bash
+# Basic benchmarks
+cargo bench --bench sapi_comparison
+
+# External server comparison (requires setup)
 BENCH_COMPARE=1 \
     BENCH_FPM_BIN=/path/to/php-fpm \
     BENCH_FRANKENPHP_BIN=/path/to/frankenphp \
     cargo bench --bench sapi_comparison
 ```
 
-## Examples
-
-See `examples/` and `tests/php_scripts/` for sample usage and test scripts.
+For benchmark configuration and debug helpers, see `.cargo/config.toml.example`.
 
 ## Support Development
 This project is part of a larger educational initiative about PHP internals and Rust FFI.

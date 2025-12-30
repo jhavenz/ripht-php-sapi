@@ -1,8 +1,5 @@
 //! Benchmark comparing ripht-php-sapi against php-fpm and FrankenPHP.
 //!
-//! This benchmark automatically enables comparison with other SAPIs.
-//! For performance-only testing, use `sapi_performance` instead.
-//!
 //! # Usage
 //!
 //! ```bash
@@ -12,8 +9,9 @@
 //! # Environment Variables
 //!
 //! - `BENCH_WORKERS=N` — Number of pooled workers (default: 4)
-//! - `BENCH_FPM_BIN=/path/to/php-fpm` — Path to php-fpm binary (auto-detected if not set)
-//! - `BENCH_FRANKENPHP_BIN=/path/to/frankenphp` — Path to FrankenPHP binary (auto-detected if not set)
+//! - `BENCH_COMPARE=1` — Enable php-fpm and FrankenPHP comparisons
+//! - `BENCH_FPM_BIN=/path/to/php-fpm` — Path to php-fpm binary
+//! - `BENCH_FRANKENPHP_BIN=/path/to/frankenphp` — Path to FrankenPHP binary
 //! - `BENCH_FPM_ONLY=1` — Benchmark only php-fpm
 //! - `BENCH_FRANKENPHP_ONLY=1` — Benchmark only FrankenPHP
 
@@ -23,44 +21,9 @@ use criterion::{
     black_box, criterion_group, criterion_main, Criterion, Throughput,
 };
 use shared::{
-    Backend, BenchSuite, FpmBackend, FrankenPhpBackend, Method, PooledBackend,
-    SapiBackend,
+    Backend, BenchSuite, FpmBackend, FrankenPhpBackend, Method, Pool,
+    PooledBackend, SapiBackend,
 };
-
-fn ensure_comparison_mode() {
-    std::env::set_var("BENCH_COMPARE", "1");
-
-    // Auto-detect binaries if needed
-    if std::env::var("BENCH_FPM_BIN").is_err() {
-        if let Ok(output) = std::process::Command::new("which")
-            .arg("php-fpm")
-            .output()
-        {
-            if output.status.success() {
-                let path_str = String::from_utf8_lossy(&output.stdout);
-                let path = path_str.trim();
-                if !path.is_empty() {
-                    std::env::set_var("BENCH_FPM_BIN", path);
-                }
-            }
-        }
-    }
-
-    if std::env::var("BENCH_FRANKENPHP_BIN").is_err() {
-        if let Ok(output) = std::process::Command::new("which")
-            .arg("frankenphp")
-            .output()
-        {
-            if output.status.success() {
-                let path_str = String::from_utf8_lossy(&output.stdout);
-                let path = path_str.trim();
-                if !path.is_empty() {
-                    std::env::set_var("BENCH_FRANKENPHP_BIN", path);
-                }
-            }
-        }
-    }
-}
 
 const SUITES: &[BenchSuite] = &[
     BenchSuite {
@@ -89,8 +52,8 @@ const SUITES: &[BenchSuite] = &[
     },
 ];
 
+// Generic
 fn run_suite(c: &mut Criterion, suite: &BenchSuite) {
-    ensure_comparison_mode();
     shared::worker::maybe_run_worker();
 
     let mut group = c.benchmark_group(suite.name);
@@ -133,12 +96,10 @@ fn run_suite(c: &mut Criterion, suite: &BenchSuite) {
                     ))
                 })
             });
-        } else {
-            eprintln!("Warning: php-fpm benchmark skipped (binary not found or failed to start)");
         }
     }
 
-    if support::should_run_frankenphp_sapi() {
+    if shared::should_run_frankenphp_sapi() {
         if let Some(mut backend) = FrankenPhpBackend::start() {
             group.bench_function(backend.name(), |b| {
                 b.iter(|| {
@@ -149,8 +110,6 @@ fn run_suite(c: &mut Criterion, suite: &BenchSuite) {
                     ))
                 })
             });
-        } else {
-            eprintln!("Warning: FrankenPHP benchmark skipped (binary not found or failed to start)");
         }
     }
 
@@ -173,12 +132,30 @@ fn bench_large_output(c: &mut Criterion) {
     run_suite(c, &SUITES[3]);
 }
 
+fn bench_ipc_echo(c: &mut Criterion) {
+    shared::worker::maybe_run_worker();
+
+    let mut pool = Pool::from_env();
+
+    for (name, size) in [("small", 32usize), ("large", 256 * 1024)] {
+        let mut group = c.benchmark_group(&format!("ipc_echo_{}", name));
+        group.throughput(Throughput::Bytes(size as u64));
+
+        group.bench_function("msgpack_pipe", |b| {
+            b.iter(|| black_box(pool.echo(size)))
+        });
+
+        group.finish();
+    }
+}
+
 criterion_group!(
     benches,
     bench_simple_get,
     bench_json_api,
     bench_post_json,
     bench_large_output,
+    bench_ipc_echo,
 );
 
 criterion_main!(benches);

@@ -33,7 +33,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "{:.<30} {} ({})",
             name,
             result.status_code(),
-            if result.status_code() == 200 { "OK" } else { "ERR" }
+            if result.status_code() == 200 {
+                "OK"
+            } else {
+                "ERR"
+            }
         );
     }
 

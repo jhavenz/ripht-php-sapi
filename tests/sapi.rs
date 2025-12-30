@@ -72,7 +72,12 @@ fn stress_sequential_requests() {
             .execute(exec)
             .unwrap_or_else(|_| panic!("request {} execution failed", i));
 
-        assert_eq!(result.status_code(), 200, "Request {} had non-200 status", i);
+        assert_eq!(
+            result.status_code(),
+            200,
+            "Request {} had non-200 status",
+            i
+        );
     }
 }
 
@@ -284,7 +289,9 @@ fn test_error_handling_with_errors_script() {
     assert_eq!(result.status_code(), 200);
 
     assert!(
-        result.all_messages().any(|_| true),
+        result
+            .all_messages()
+            .any(|_| true),
         "Response should contain messages from error_log() and trigger_error()"
     );
 

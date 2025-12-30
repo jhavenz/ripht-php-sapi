@@ -23,7 +23,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let result = sapi.execute_with_hooks(exec, ValidationHooks)?;
 
     println!("Status: {}", result.status_code());
-    
+
     println!("\nOutput from PHP:");
     println!("{}", result.body_string());
 

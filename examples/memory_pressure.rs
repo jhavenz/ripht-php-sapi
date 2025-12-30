@@ -29,7 +29,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .build(&script)?;
         let result = sapi.execute(exec)?;
 
-        if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&result.body()) {
+        if let Ok(json) =
+            serde_json::from_slice::<serde_json::Value>(&result.body())
+        {
             let peak = json["peak_after"]
                 .as_u64()
                 .unwrap_or(0) as f64
@@ -43,14 +45,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     println!("\nRepeated allocation cycles:");
-    
+
     for i in 1..=3 {
         let exec = WebRequest::get()
             .with_uri("/?action=allocate&size=3000")
             .build(&script)?;
         let result = sapi.execute(exec)?;
 
-        if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&result.body()) {
+        if let Ok(json) =
+            serde_json::from_slice::<serde_json::Value>(&result.body())
+        {
             let peak = json["peak_after"]
                 .as_u64()
                 .unwrap_or(0) as f64

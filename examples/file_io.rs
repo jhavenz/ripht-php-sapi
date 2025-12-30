@@ -31,7 +31,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         (
             WebRequest::get().with_uri("/?action=sqlite&rows=500"),
             "SQLite (500 rows):",
-        )
+        ),
     ];
 
     for (req, msg) in reqs {

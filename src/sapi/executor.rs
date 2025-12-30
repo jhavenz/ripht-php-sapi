@@ -236,7 +236,7 @@ impl<'sapi> Executor<'sapi> {
                 status,
                 body,
                 headers,
-                server_ctx.messages
+                server_ctx.messages,
             );
 
             hooks.on_request_finished(&result);

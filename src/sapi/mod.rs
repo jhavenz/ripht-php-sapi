@@ -2,7 +2,7 @@
 //!
 //! Handles module startup/shutdown (MINIT/MSHUTDOWN), callback registration,
 //! and provides the primary `RiphtSapi` interface for script execution.
-//! 
+//!
 //! Adheres to the Common Gateway Interface (CGI) Version 1.1 specification for environment variable semantics.
 //!
 //! ## Specification Compliance
@@ -37,7 +37,8 @@ static PHP_INIT_RESULT: OnceLock<Result<(), SapiError>> = OnceLock::new();
 
 pub(crate) static SAPI_NAME: &[u8] = b"ripht\0";
 pub(crate) static SAPI_PRETTY_NAME: &[u8] = b"Ripht PHP SAPI\0";
-pub(crate) static SERVER_SOFTWARE: &str = concat!("Ripht/", env!("CARGO_PKG_VERSION"));
+pub(crate) static SERVER_SOFTWARE: &str =
+    concat!("Ripht/", env!("CARGO_PKG_VERSION"));
 static INI_ENTRIES: &[u8] = b"\
 variables_order=EGPCS\n\
 request_order=GP\n\
@@ -189,15 +190,18 @@ impl RiphtSapi {
         }
     }
 
-    pub fn set_ini(&self, key: impl Into<Vec<u8>>, value: impl Into<Vec<u8>>) -> Result<(), SapiError> {
+    pub fn set_ini(
+        &self,
+        key: impl Into<Vec<u8>>,
+        value: impl Into<Vec<u8>>,
+    ) -> Result<(), SapiError> {
         let k_str = key.into();
-            let v_str = value.into();
+        let v_str = value.into();
 
-
-        let key_cstr =
-            CString::new(k_str.clone()).map_err(|_| SapiError::InvalidIniKey)?;
-        let value_cstr =
-            CString::new(v_str.clone()).map_err(|_| SapiError::InvalidIniValue)?;
+        let key_cstr = CString::new(k_str.clone())
+            .map_err(|_| SapiError::InvalidIniKey)?;
+        let value_cstr = CString::new(v_str.clone())
+            .map_err(|_| SapiError::InvalidIniValue)?;
 
         unsafe {
             let init = ffi::zend_string_init_interned
@@ -206,7 +210,9 @@ impl RiphtSapi {
             let name = init(key_cstr.as_ptr(), k_str.len(), true);
 
             if name.is_null() {
-                return Err(SapiError::IniSetFailed(String::from_utf8(k_str).unwrap_or_default()));
+                return Err(SapiError::IniSetFailed(
+                    String::from_utf8(k_str).unwrap_or_default(),
+                ));
             }
 
             let result = ffi::zend_alter_ini_entry_chars(
@@ -218,7 +224,9 @@ impl RiphtSapi {
             );
 
             if result != ffi::SUCCESS {
-                return Err(SapiError::IniSetFailed(String::from_utf8(k_str).unwrap_or_default()));
+                return Err(SapiError::IniSetFailed(
+                    String::from_utf8(k_str).unwrap_or_default(),
+                ));
             }
 
             Ok(())

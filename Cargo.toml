@@ -1,6 +1,6 @@
 [package]
 name = "ripht-php-sapi"
-version = "0.1.0-rc.4"
+version = "0.1.0-rc.5"
 edition = "2021"
 authors = ["Jonathan Havens <mail@jhavens.tech>"]
 repository = "https://github.com/jhavenz/ripht-php-sapi"
@@ -24,6 +24,8 @@ memchr = "2.7"
 [dev-dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+serde_bytes = "0.11"
+rmp-serde = "1"
 criterion = { version = "0.5", features = ["html_reports"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 

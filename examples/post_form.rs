@@ -13,7 +13,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .join("tests/php_scripts")
         .join("post_form.php");
 
-    let body = "name=John%20Doe&email=john%40example.com&message=Hello%20from%20Rust!";
+    let body =
+        "name=John%20Doe&email=john%40example.com&message=Hello%20from%20Rust!";
     let exec = WebRequest::post()
         .with_content_type("application/x-www-form-urlencoded")
         .with_body(body.as_bytes().to_vec())

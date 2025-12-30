@@ -94,7 +94,7 @@ impl Method {
 /// Builder for web-style PHP requests.
 ///
 /// Use the `with_*` methods to configure headers, cookies, body, and server
-/// info, then call `build()` to create an `ExecutionContext`.
+/// info, then call `build()` to create an [`ExecutionContext`].
 #[derive(Debug, Clone)]
 pub struct WebRequest {
     https: bool,
@@ -570,7 +570,9 @@ mod tests {
             .expect("execution should succeed");
 
         assert!(
-            result.all_messages().any(|_| true),
+            result
+                .all_messages()
+                .any(|_| true),
             "Web execution should capture error_log messages"
         );
 

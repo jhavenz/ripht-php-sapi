@@ -35,7 +35,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Status: {}", result.status_code());
 
-    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&result.body_string()) {
+    if let Ok(json) =
+        serde_json::from_str::<serde_json::Value>(&result.body_string())
+    {
         println!("Response:\n{}", serde_json::to_string_pretty(&json)?);
     } else {
         println!("Body: {}", result.body_string());

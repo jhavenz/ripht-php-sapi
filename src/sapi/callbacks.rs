@@ -28,7 +28,7 @@ const HTTP_STATUS_MIN: i32 = 100;
 const HTTP_STATUS_MAX: i32 = 599;
 const HTTP_STATUS_FALLBACK: u16 = 500;
 
-/// Returns the `ServerContext` pointer if valid. See module docs for safety.
+/// Returns the [`ServerContext`] pointer if valid. See module docs for safety.
 #[inline]
 pub(crate) unsafe fn get_context() -> Option<*mut ServerContext> {
     let ptr = ffi::sapi_globals.server_context as *mut ServerContext;
@@ -141,12 +141,15 @@ pub unsafe extern "C" fn ripht_sapi_send_headers(
             };
 
         (*ctx_ptr).set_status(status_code);
-        (*ctx_ptr).response_headers.clear();
+        (*ctx_ptr)
+            .response_headers
+            .clear();
 
         // Iterate PHP's header list
         let mut elem = (*sapi_headers).headers.head;
         while !elem.is_null() {
-            let header_ptr = (*elem).data.as_ptr() as *mut ffi::sapi_header_struct;
+            let header_ptr =
+                (*elem).data.as_ptr() as *mut ffi::sapi_header_struct;
             ripht_sapi_send_header(header_ptr, std::ptr::null_mut());
             elem = (*elem).next;
         }
@@ -179,7 +182,8 @@ pub unsafe extern "C" fn ripht_sapi_send_header(
             return;
         }
 
-        let bytes = std::slice::from_raw_parts(header_ptr as *const u8, header_len);
+        let bytes =
+            std::slice::from_raw_parts(header_ptr as *const u8, header_len);
 
         if let Some(h) = ResponseHeader::parse(bytes) {
             (*ctx_ptr).add_header(h);
@@ -202,7 +206,8 @@ pub unsafe extern "C" fn ripht_sapi_read_post(
             return 0;
         };
 
-        let slice = std::slice::from_raw_parts_mut(buffer as *mut u8, count_bytes);
+        let slice =
+            std::slice::from_raw_parts_mut(buffer as *mut u8, count_bytes);
         (*ctx_ptr).read_post(slice)
     }));
 
@@ -232,7 +237,11 @@ pub unsafe extern "C" fn ripht_sapi_register_server_variables(
     }
 
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        register_var_static(track_vars_array, c"SERVER_SOFTWARE", SERVER_SOFTWARE);
+        register_var_static(
+            track_vars_array,
+            c"SERVER_SOFTWARE",
+            SERVER_SOFTWARE,
+        );
 
         let Some(ctx_ptr) = get_context() else {
             return;
@@ -362,7 +371,8 @@ pub unsafe extern "C" fn ripht_sapi_getenv(
     }
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let name_bytes = std::slice::from_raw_parts(name as *const u8, name_len);
+        let name_bytes =
+            std::slice::from_raw_parts(name as *const u8, name_len);
 
         if let Some(ctx_ptr) = get_context() {
             if let Some(ptr) = (*ctx_ptr).get_env(name_bytes) {
@@ -631,7 +641,9 @@ mod tests {
             ripht_sapi_send_header(&mut header, std::ptr::null_mut());
 
             assert_eq!(
-                (*ctx_ptr).response_headers.len(),
+                (*ctx_ptr)
+                    .response_headers
+                    .len(),
                 0,
                 "Header with no colon should not be added"
             );
@@ -668,7 +680,9 @@ mod tests {
             ripht_sapi_send_header(&mut header, std::ptr::null_mut());
 
             assert_eq!(
-                (*ctx_ptr).response_headers.len(),
+                (*ctx_ptr)
+                    .response_headers
+                    .len(),
                 0,
                 "Header with colon at start (empty name) should not be added"
             );
@@ -686,6 +700,7 @@ mod tests {
         let exec = WebRequest::get()
             .build(&script_path)
             .expect("failed to build WebRequest");
+
         let _result = php
             .execute(exec)
             .expect("hello.php request execution failed");
@@ -703,7 +718,9 @@ mod tests {
 
             ripht_sapi_send_header(&mut header, std::ptr::null_mut());
 
-            let headers_len = (*ctx_ptr).response_headers.len();
+            let headers_len = (*ctx_ptr)
+                .response_headers
+                .len();
 
             assert_eq!(
                 headers_len, 1,
@@ -746,7 +763,9 @@ mod tests {
             ripht_sapi_send_header(&mut header, std::ptr::null_mut());
 
             assert_eq!(
-                (*ctx_ptr).response_headers.len(),
+                (*ctx_ptr)
+                    .response_headers
+                    .len(),
                 1,
                 "Header with colon at end should be added with empty value"
             );

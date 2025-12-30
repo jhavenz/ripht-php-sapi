@@ -39,7 +39,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     .into_bytes();
 
     let exec = WebRequest::post()
-        .with_content_type(format!("multipart/form-data; boundary={}", boundary))
+        .with_content_type(format!(
+            "multipart/form-data; boundary={}",
+            boundary
+        ))
         .with_body(body)
         .build(&script_path)?;
 

@@ -1,127 +1,54 @@
-//! Basic throughput benchmarks for ripht-php-sapi requests.
+//! Throughput benchmarks for ripht-php-sapi.
 //!
-//! Run: `cargo bench --bench throughput`
+//! Measures raw throughput for various workloads.
+//!
+//! # Usage
+//!
+//! ```bash
+//! cargo bench --bench throughput
+//! ```
 
-use std::path::PathBuf;
+mod shared;
 
 use criterion::{
     black_box, criterion_group, criterion_main, Criterion, Throughput,
 };
-use ripht_php_sapi::{RiphtSapi, WebRequest};
+use shared::{Backend, Method, SapiBackend};
 
-criterion_group!(
-    benches,
-    bench_simple_request,
-    bench_json_api,
-    bench_post_json,
-    bench_file_io,
-    bench_throughput,
-);
+fn bench_simple_request_throughput(c: &mut Criterion) {
+    shared::worker::maybe_run_worker();
 
-criterion_main!(benches);
-
-fn php_script_path(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/php_scripts")
-        .join(name)
-}
-
-fn bench_simple_request(c: &mut Criterion) {
-    let sapi = RiphtSapi::instance();
-    let script = php_script_path("hello.php");
-
-    c.bench_function("simple_get", |b| {
-        b.iter(|| {
-            let exec = WebRequest::get()
-                .build(&script)
-                .expect("build failed");
-
-            black_box(
-                sapi.execute(exec)
-                    .expect("execution failed"),
-            )
-        })
-    });
-}
-
-fn bench_json_api(c: &mut Criterion) {
-    let sapi = RiphtSapi::instance();
-    let script = php_script_path("api.php");
-
-    c.bench_function("json_api_get", |b| {
-        b.iter(|| {
-            let exec = WebRequest::get()
-                .with_uri("/?action=status")
-                .build(&script)
-                .expect("build failed");
-
-            black_box(
-                sapi.execute(exec)
-                    .expect("execution failed"),
-            )
-        })
-    });
-}
-
-fn bench_post_json(c: &mut Criterion) {
-    let sapi = RiphtSapi::instance();
-    let script = php_script_path("post_json.php");
-    let body = r#"{"name":"test","value":42}"#;
-
-    c.bench_function("post_json", |b| {
-        b.iter(|| {
-            let exec = WebRequest::post()
-                .with_content_type("application/json")
-                .with_body(body.as_bytes().to_vec())
-                .build(&script)
-                .expect("build failed");
-
-            black_box(
-                sapi.execute(exec)
-                    .expect("execution failed"),
-            )
-        })
-    });
-}
-
-fn bench_file_io(c: &mut Criterion) {
-    let sapi = RiphtSapi::instance();
-    let script = php_script_path("file_io.php");
-
-    c.bench_function("file_io", |b| {
-        b.iter(|| {
-            let exec = WebRequest::get()
-                .with_uri("/?action=readwrite")
-                .build(&script)
-                .expect("build failed");
-
-            black_box(
-                sapi.execute(exec)
-                    .expect("execution failed"),
-            )
-        })
-    });
-}
-
-fn bench_throughput(c: &mut Criterion) {
-    let sapi = RiphtSapi::instance();
-    let script = php_script_path("hello.php");
+    let mut backend = SapiBackend::new();
 
     let mut group = c.benchmark_group("throughput");
     group.throughput(Throughput::Elements(1));
 
-    group.bench_function("requests_per_second", |b| {
-        b.iter(|| {
-            let exec = WebRequest::get()
-                .build(&script)
-                .expect("build failed");
-
-            black_box(
-                sapi.execute(exec)
-                    .expect("execution failed"),
-            )
-        })
+    group.bench_function("simple_request", |b| {
+        b.iter(|| black_box(backend.execute("hello.php", Method::Get, None)))
     });
 
     group.finish();
 }
+
+fn bench_file_io_throughput(c: &mut Criterion) {
+    shared::worker::maybe_run_worker();
+
+    let mut backend = SapiBackend::new();
+
+    let mut group = c.benchmark_group("file_io");
+    group.throughput(Throughput::Elements(1));
+
+    group.bench_function("read_write", |b| {
+        b.iter(|| black_box(backend.execute("file_io.php", Method::Get, None)))
+    });
+
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    bench_simple_request_throughput,
+    bench_file_io_throughput
+);
+
+criterion_main!(benches);

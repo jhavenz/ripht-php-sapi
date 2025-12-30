@@ -236,7 +236,7 @@ impl ServerVars {
 
     pub fn cli_defaults() -> Self {
         let mut vars = Self::with_capacity(12);
-        
+
         vars.request_time()
             .set_empty_document_root();
 

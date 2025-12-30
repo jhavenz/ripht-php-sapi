@@ -33,7 +33,8 @@ pub mod execution;
 mod sapi;
 
 pub use adapters::{
-    CliRequest, CliRequestError, Method, WebRequest, WebRequestError,
+    AdapterError, CliRequest, CliRequestError, Method, PhpSapiAdapter,
+    WebRequest, WebRequestError,
 };
 
 pub use sapi::{ExecutionError, Executor, RiphtSapi, SapiError};
@@ -45,10 +46,10 @@ pub use execution::{
 
 pub mod prelude {
     pub use crate::{
-        CliRequest, CliRequestError, ExecutionContext, ExecutionHooks,
-        ExecutionMessage, ExecutionResult, Executor, Method, NoOpHooks,
-        OutputAction, ResponseHeader, RiphtSapi, SapiError, StreamingCallback,
-        SyslogLevel, WebRequest, WebRequestError,
+        AdapterError, CliRequest, CliRequestError, ExecutionContext,
+        ExecutionHooks, ExecutionMessage, ExecutionResult, Executor, Method,
+        NoOpHooks, OutputAction, PhpSapiAdapter, ResponseHeader, RiphtSapi,
+        SapiError, StreamingCallback, SyslogLevel, WebRequest, WebRequestError,
     };
 
     #[cfg(feature = "http")]

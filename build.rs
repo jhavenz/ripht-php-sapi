@@ -88,7 +88,7 @@ fn find_php_prefix() -> Option<PathBuf> {
     let candidates = [
         format!("{}/.ripht/php", home),
         format!("{}/.local/php", home),
-        "/usr/local".to_string(),      
+        "/usr/local".to_string(),
     ];
 
     for candidate in &candidates {

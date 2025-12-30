@@ -252,7 +252,9 @@ mod tests {
             .expect("execution should succeed");
 
         assert!(
-            result.all_messages().any(|_| true),
+            result
+                .all_messages()
+                .any(|_| true),
             "CLI execution should capture error_log messages"
         );
 

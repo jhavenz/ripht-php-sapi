@@ -5,8 +5,8 @@
 
 #[cfg(feature = "tracing")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    use std::path::PathBuf;
     use ripht_php_sapi::{RiphtSapi, WebRequest};
+    use std::path::PathBuf;
     use tracing::info;
 
     // 1. Initialize a tracing subscriber.
@@ -16,7 +16,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Initializing SAPI...");
     let sapi = RiphtSapi::instance();
-    
+
     let script_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/php_scripts")
         .join("hello.php");
@@ -31,7 +31,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let result = sapi.execute(exec)?;
 
     info!("Done. Status: {}", result.status_code());
-    
+
     Ok(())
 }
 
