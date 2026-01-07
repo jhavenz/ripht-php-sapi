@@ -1,6 +1,6 @@
-//! Basic ExecutionHooks usage demonstrating lifecycle callbacks.
+//! Basic [`ExecutionHooks`] usage demonstrating lifecycle callbacks.
 //!
-//! This example shows how to implement `ExecutionHooks` to observe the PHP
+//! This example shows how to implement [`ExecutionHooks`] to observe the PHP
 //! request lifecycle without modifying behavior.
 //!
 //! Run: `cargo run --example hooks_basic`
@@ -101,5 +101,13 @@ impl ExecutionHooks for LifecycleObserver {
             result.status_code(),
             result.body().len()
         ));
+    }
+}
+
+impl Drop for LifecycleObserver {
+    fn drop(&mut self) {
+        for m in &self.events {
+            println!("Hook log: {}", m);
+        }
     }
 }

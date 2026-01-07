@@ -4,8 +4,8 @@ target/
 *.md
 *.yml
 *.toml
-
 .cargo/config.toml
+
 !.cargo/config.toml.example
 !README.md
 !CONTRIBUTING.md

@@ -1,12 +1,12 @@
-//! Using the StreamingCallback helper for output handling with execute_with_hooks.
+//! Using the [`StreamingCallback`] helper for output handling with execute_with_hooks.
 //!
-//! `StreamingCallback` is a convenience wrapper that implements `ExecutionHooks`
-//! with a closure for `on_output`, returning `OutputAction::Done`. This is
-//! useful when you only need to handle output but want to use `execute_with_hooks`
+//! [`StreamingCallback`] is a convenience wrapper that implements [`ExecutionHooks`]
+//! with a closure for [`on_output`], returning [`OutputAction::Done`]. This is
+//! useful when you only need to handle output but want to use [`execute_with_hooks`]
 //! for other hook functionality.
 //!
-//! Note: For simple streaming use cases, `execute_streaming()` is more direct.
-//! Use `StreamingCallback` when you need hooks AND output handling together.
+//! Note: For simple streaming use cases, [`execute_streaming()`] is more direct.
+//! Use [`StreamingCallback`] when you need hooks AND output handling together.
 //!
 //! Run: `cargo run --example hooks_streaming_callback`
 
@@ -39,10 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("\n--- Result ---");
     println!("Status: {}", result.status_code());
-    println!(
-        "Body length: {} (empty because StreamingCallback returns Handled)",
-        result.body().len()
-    );
+    println!("Body length: {}", result.body().len());
     println!("Headers: {}", result.all_headers().count());
 
     Ok(())

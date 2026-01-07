@@ -193,14 +193,12 @@ BENCH_COMPARE=1 \
 
 For benchmark configuration and debug helpers, see `.cargo/config.toml.example`.
 
-## Support Development
-This project is part of a larger educational initiative about PHP internals and Rust FFI.
-- [Vote on educational content direction](https://www.patreon.com/posts/gauging-php-sapi-146489023)
-- [Support on Patreon](https://www.patreon.com/cw/jhavenz)
+## Support My Work
+- [Patreon](https://www.patreon.com/cw/jhavenz)
 
 ## Contributing
 
-If you'd like to help, open an issue or a PR — small, focused changes are appreciated.
+If you'd like to help, small and focused changes are appreciated.
 
 ## License
 

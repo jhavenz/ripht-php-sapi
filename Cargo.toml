@@ -1,6 +1,6 @@
 [package]
 name = "ripht-php-sapi"
-version = "0.1.0-rc.5"
+version = "0.1.0-rc.7"
 edition = "2021"
 authors = ["Jonathan Havens <mail@jhavens.tech>"]
 repository = "https://github.com/jhavenz/ripht-php-sapi"
@@ -48,4 +48,3 @@ http = ["dep:http"]
 
 [package.metadata.docs.rs]
 features = ["serde", "tracing", "http"]
-

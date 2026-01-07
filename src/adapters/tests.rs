@@ -1,10 +1,7 @@
-//! Comprehensive tests for PhpSapiAdapter trait and AdapterError.
-
 use super::*;
 use std::error::Error;
 use std::path::PathBuf;
 
-// Test helper functions
 fn php_script_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/php_scripts")
@@ -15,7 +12,6 @@ fn nonexistent_script_path() -> PathBuf {
     PathBuf::from("/definitely/does/not/exist/script.php")
 }
 
-// Create a custom adapter for testing trait functionality
 #[derive(Debug, Clone)]
 struct TestAdapter {
     required_field: Option<String>,
@@ -52,22 +48,18 @@ impl PhpSapiAdapter for TestAdapter {
         self,
         script_path: impl AsRef<Path>,
     ) -> Result<ExecutionContext, AdapterError> {
-        // Validate script path
         let validated_path = Self::validate_script_path(script_path)?;
 
-        // Validate required configuration
         let required = self
             .required_field
             .ok_or_else(|| {
                 AdapterError::MissingConfiguration("required_field".to_string())
             })?;
 
-        // Validate non-empty unless explicitly allowed
         if !self.allow_empty_required {
             Self::validate_non_empty("required_field", &required)?;
         }
 
-        // Validate port range
         Self::validate_field(
             "port",
             &self.optional_port,
@@ -75,14 +67,11 @@ impl PhpSapiAdapter for TestAdapter {
             "must be greater than 0",
         )?;
 
-        // Build a minimal execution context
         Ok(ExecutionContext::script(validated_path)
             .var("TEST_REQUIRED", required)
             .var("TEST_PORT", self.optional_port.to_string()))
     }
 }
-
-// Tests for AdapterError
 
 #[test]
 fn test_adapter_error_display() {
@@ -153,8 +142,6 @@ fn test_adapter_error_source() {
         .source()
         .is_none());
 }
-
-// Tests for PhpSapiAdapter trait validation methods
 
 #[test]
 fn test_validate_script_path_existing() {
@@ -237,8 +224,6 @@ fn test_validate_field_failure() {
     }
 }
 
-// Tests for custom TestAdapter implementation
-
 #[test]
 fn test_custom_adapter_success() {
     let script_path = php_script_path("hello.php");
@@ -251,7 +236,6 @@ fn test_custom_adapter_success() {
 
     assert_eq!(context.script_path, script_path);
 
-    // Check that our custom variables were set
     let has_required = context
         .server_vars
         .iter()
@@ -286,7 +270,6 @@ fn test_custom_adapter_missing_required() {
 fn test_custom_adapter_empty_required() {
     let script_path = php_script_path("hello.php");
 
-    // Should fail with empty required field
     let result = TestAdapter::new()
         .with_required_field("")
         .build(&script_path);
@@ -299,7 +282,6 @@ fn test_custom_adapter_empty_required() {
         _ => panic!("Expected MissingConfiguration error"),
     }
 
-    // Should succeed when empty is explicitly allowed
     let result = TestAdapter::new()
         .with_required_field("")
         .allow_empty_required()
@@ -311,10 +293,11 @@ fn test_custom_adapter_empty_required() {
 #[test]
 fn test_custom_adapter_invalid_port() {
     let script_path = php_script_path("hello.php");
+    let invalid_port = 0;
 
     let result = TestAdapter::new()
         .with_required_field("test")
-        .with_port(0) // Invalid port
+        .with_port(invalid_port)
         .build(&script_path);
 
     assert!(result.is_err());
@@ -349,27 +332,23 @@ fn test_custom_adapter_nonexistent_script() {
     }
 }
 
-// Tests for existing adapter implementations
-
 #[test]
 fn test_web_adapter_trait_implementation() {
     let script_path = php_script_path("hello.php");
 
-    // Test successful build
     let context = WebRequest::get()
         .with_uri("/test")
         .build(&script_path)
         .expect("should build successfully");
 
     assert_eq!(context.script_path, script_path);
-    assert!(!context.log_to_stderr); // Web requests should not log to stderr
+    assert!(!context.log_to_stderr); 
 }
 
 #[test]
 fn test_web_adapter_trait_error_conversion() {
     let script_path = nonexistent_script_path();
 
-    // Test trait conversion by going through PhpSapiAdapter
     let result: Result<ExecutionContext, AdapterError> =
         PhpSapiAdapter::build(WebRequest::get(), &script_path);
 
@@ -386,8 +365,7 @@ fn test_web_adapter_trait_error_conversion() {
 fn test_web_adapter_trait_missing_method() {
     let script_path = php_script_path("hello.php");
 
-    // Create WebRequest without setting method
-    let web_request = WebRequest::default(); // This won't have a method set
+    let web_request = WebRequest::default();
     let result: Result<ExecutionContext, AdapterError> =
         PhpSapiAdapter::build(web_request, &script_path);
 
@@ -404,21 +382,19 @@ fn test_web_adapter_trait_missing_method() {
 fn test_cli_adapter_trait_implementation() {
     let script_path = php_script_path("hello.php");
 
-    // Test successful build
     let context = CliRequest::new()
         .with_arg("--test")
         .build(&script_path)
         .expect("should build successfully");
 
     assert_eq!(context.script_path, script_path);
-    assert!(context.log_to_stderr); // CLI requests should log to stderr
+    assert!(context.log_to_stderr); 
 }
 
 #[test]
 fn test_cli_adapter_trait_error_conversion() {
     let script_path = nonexistent_script_path();
 
-    // Test trait conversion by going through PhpSapiAdapter
     let result: Result<ExecutionContext, AdapterError> =
         PhpSapiAdapter::build(CliRequest::new(), &script_path);
 
@@ -431,8 +407,7 @@ fn test_cli_adapter_trait_error_conversion() {
     }
 }
 
-// Integration tests - Note: trait objects not supported due to Self: Sized constraints on utility methods
-
+// Note: trait objects not supported due to Self: Sized constraints on utility methods
 fn execute_adapter<A: PhpSapiAdapter>(
     adapter: A,
     script: impl AsRef<Path>,
@@ -444,7 +419,6 @@ fn execute_adapter<A: PhpSapiAdapter>(
 fn test_generic_adapter_function() {
     let script_path = php_script_path("hello.php");
 
-    // Test that we can use adapters generically
     let web_result = execute_adapter(WebRequest::get(), &script_path);
     assert!(web_result.is_ok());
 
@@ -458,11 +432,8 @@ fn test_generic_adapter_function() {
     assert!(test_result.is_ok());
 }
 
-// Performance and stress tests
-
 #[test]
 fn test_validation_error_performance() {
-    // Test that validation errors are efficiently created
     let start = std::time::Instant::now();
 
     for i in 0..1000 {
@@ -482,7 +453,6 @@ fn test_validation_error_performance() {
 fn test_large_configuration_validation() {
     let script_path = php_script_path("hello.php");
 
-    // Test with very long configuration values
     let long_value = "a".repeat(10000);
 
     let result = TestAdapter::new()

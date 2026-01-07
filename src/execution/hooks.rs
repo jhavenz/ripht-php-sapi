@@ -45,7 +45,7 @@ where
 /// Default implementations allow for selective participation.
 /// Method names are purposefully self-explanatory/self-documenting.
 pub trait ExecutionHooks {
-    /// Called after ServerContext is created.
+    /// Called after server context is created.
     fn on_context_created(&mut self) {}
     fn on_request_starting(&mut self) {}
     fn on_request_started(&mut self) {}

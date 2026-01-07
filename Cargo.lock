@@ -538,7 +538,7 @@ checksum = "7a2d987857b319362043e95f5353c0535c1f58eec5336fdfcf626430af7def58"
 
 [[package]]
 name = "ripht-php-sapi"
-version = "0.1.0-rc.5"
+version = "0.1.0-rc.7"
 dependencies = [
  "bindgen",
  "criterion",

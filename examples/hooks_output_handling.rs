@@ -1,6 +1,6 @@
 //! Hooks with output handling - processing the buffered output after execution.
 //!
-//! This example demonstrates using `on_output` to handle the complete response
+//! This example demonstrates using [`on_output`] to handle the complete response
 //! body after PHP execution, transforming or forwarding it as needed.
 //!
 //! Run: `cargo run --example hooks_output_handling`
@@ -28,7 +28,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Status: {}", result.status_code());
 
     println!(
-        "Body (empty because we returned Handled): {} bytes",
+        "Body (empty because we returned [OutputAction::Done]): {} bytes",
         result.body().len()
     );
 

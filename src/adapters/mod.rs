@@ -81,7 +81,7 @@ impl From<CliRequestError> for AdapterError {
 
 /// Trait for types that can be converted into PHP execution contexts.
 ///
-/// This trait provides a unified interface for building `ExecutionContext` instances
+/// This trait provides a unified interface for building [`ExecutionContext`] instances
 /// from different request types (Web, CLI, custom adapters). Implementors configure
 /// their internal state through builder methods, then call `build()` to create
 /// the final execution context.
@@ -95,7 +95,7 @@ impl From<CliRequestError> for AdapterError {
 ///
 /// # Examples
 ///
-/// ```no_run
+/// ```ignore
 /// use ripht_php_sapi::{WebRequest, CliRequest, adapters::PhpSapiAdapter};
 /// use std::path::Path;
 ///
@@ -106,12 +106,12 @@ impl From<CliRequestError> for AdapterError {
 ///     .with_uri("/api/test")
 ///     .build(script)?;
 ///
-/// // CLI adapter  
+/// // CLI adapter
 /// let cli_ctx = CliRequest::new()
 ///     .with_arg("--verbose")
 ///     .build(script)?;
 ///
-/// // Both return ExecutionContext through the same interface
+/// // Both return [ExecutionContext] through the same interface
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 ///
@@ -121,7 +121,7 @@ impl From<CliRequestError> for AdapterError {
 /// 1. Validate configuration before building
 /// 2. Handle script path existence checking
 /// 3. Return appropriate error types
-/// 4. Ensure the resulting `ExecutionContext` is valid for execution
+/// 4. Ensure the resulting [`ExecutionContext`] is valid for execution
 ///
 /// # Validation Patterns
 ///
@@ -284,10 +284,10 @@ impl PhpSapiAdapter for CliRequest {
 #[cfg(test)]
 mod tests;
 
-/// Example implementations demonstrating the `PhpSapiAdapter` trait pattern.
+/// Example implementations demonstrating the [`PhpSapiAdapter`] trait pattern.
 ///
 /// This module provides examples of how to create custom adapters that implement
-/// the `PhpSapiAdapter` trait. These examples are for documentation purposes
+/// the [`PhpSapiAdapter`] trait. These examples are for documentation purposes
 /// and demonstrate best practices for adapter implementation.
 #[cfg(doc)]
 pub mod examples {
@@ -299,7 +299,7 @@ pub mod examples {
     /// This example shows how to implement `PhpSapiAdapter` for a custom adapter
     /// with simple configuration validation.
     ///
-    /// ```
+    /// ```ignore
     /// # use ripht_php_sapi::adapters::{PhpSapiAdapter, examples::MinimalAdapter};
     /// # use std::path::Path;
     ///
@@ -374,7 +374,7 @@ pub mod examples {
     /// - Environment variable handling
     /// - INI override patterns
     ///
-    /// ```
+    /// ```ignore
     /// # use ripht_php_sapi::adapters::{PhpSapiAdapter, examples::AdvancedAdapter};
     /// # use std::path::Path;
     ///

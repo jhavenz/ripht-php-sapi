@@ -1,12 +1,11 @@
-//! Shows all the ExecutionHooks lifecycle methods in action.
+//! Shows all the [`ExecutionHooks`] lifecycle methods in action.
 //!
-//! Runs errors.php which demos PHP's quirky logging behavior - error_log()
+//! Runs errors.php which demos PHP's quirky logging behavior - `error_log()`
 //! actually sends messages at LOG_NOTICE level, not LOG_ERR. Go figure.
 //!
 //! Run: `cargo run --example hooks_comprehensive`
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use ripht_php_sapi::{
     ExecutionHooks, ExecutionMessage, ExecutionResult, OutputAction, RiphtSapi,
@@ -46,7 +45,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 struct ComprehensiveHooks {
     start_time: std::time::Instant,
-    connection_alive: AtomicBool,
+    connection_alive: bool,
     filtered_headers: Vec<String>,
     error_count: usize,
     warning_count: usize,
@@ -56,7 +55,7 @@ impl ComprehensiveHooks {
     fn new() -> Self {
         Self {
             start_time: std::time::Instant::now(),
-            connection_alive: AtomicBool::new(true),
+            connection_alive: true,
             filtered_headers: vec!["X-Powered-By".to_string()],
             error_count: 0,
             warning_count: 0,
@@ -175,7 +174,6 @@ impl ExecutionHooks for ComprehensiveHooks {
 
     fn is_connection_alive(&self) -> bool {
         self.connection_alive
-            .load(Ordering::Relaxed)
     }
 
     fn on_request_finishing(&mut self) {
