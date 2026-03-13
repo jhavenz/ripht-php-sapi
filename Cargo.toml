@@ -38,7 +38,7 @@ name = "sapi_comparison"
 harness = false
 
 [build-dependencies]
-bindgen = "0.69"
+bindgen = "0.72"
 
 [features]
 default = ["serde", "http"]
