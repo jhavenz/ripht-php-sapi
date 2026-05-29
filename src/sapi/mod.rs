@@ -23,31 +23,22 @@ use thiserror::Error;
 use tracing::{error, info, trace};
 
 pub(crate) mod callbacks;
+pub mod config;
 mod executor;
 pub(crate) mod ffi;
 pub(crate) mod server_context;
 pub(crate) mod server_vars;
 
+pub use config::SapiConfig;
 pub use executor::{ExecutionError, Executor};
 pub(crate) use server_vars::{ServerVars, ServerVarsCString};
 
+use config::ResolvedConfig;
 use crate::execution::{ExecutionContext, ExecutionHooks, ExecutionResult};
 
 static PHP_INIT_RESULT: OnceLock<Result<(), SapiError>> = OnceLock::new();
-
-pub(crate) static SAPI_NAME: &[u8] = b"ripht\0";
-pub(crate) static SAPI_PRETTY_NAME: &[u8] = b"Ripht PHP SAPI\0";
-pub(crate) static SERVER_SOFTWARE: &str =
-    concat!("Ripht/", env!("CARGO_PKG_VERSION"));
-static INI_ENTRIES: &[u8] = b"\
-variables_order=EGPCS\n\
-request_order=GP\n\
-output_buffering=4096\n\
-implicit_flush=0\n\
-html_errors=0\n\
-display_errors=1\n\
-log_errors=1\n\
-\0";
+static SAPI_CONFIG: OnceLock<SapiConfig> = OnceLock::new();
+pub(crate) static RESOLVED_CONFIG: OnceLock<ResolvedConfig> = OnceLock::new();
 
 /// Errors from SAPI initialization and configuration.
 #[derive(Debug, Clone, Error)]
@@ -59,11 +50,29 @@ pub enum SapiError {
     #[error("PHP initialization failed: {0}")]
     InitializationFailed(String),
 
+    #[error("PHP engine already initialized — configure() must be called before instance()")]
+    AlreadyInitialized,
+
+    #[error("SAPI already configured — configure() can only be called once")]
+    AlreadyConfigured,
+
+    #[error("SAPI name contains null byte: {0:?}")]
+    InvalidSapiName(String),
+
+    #[error("pretty name contains null byte: {0:?}")]
+    InvalidPrettyName(String),
+
+    #[error("server software string contains null byte: {0:?}")]
+    InvalidServerSoftware(String),
+
     #[error("INI key contains null byte")]
     InvalidIniKey,
 
     #[error("INI value contains null byte")]
     InvalidIniValue,
+
+    #[error("INI path contains null byte")]
+    InvalidIniPath,
 
     #[error("Failed to set INI: {0}")]
     IniSetFailed(String),
@@ -80,6 +89,26 @@ pub struct RiphtSapi {
 }
 
 impl RiphtSapi {
+    /// Apply custom SAPI configuration before the first [`RiphtSapi::instance()`] call.
+    ///
+    /// Must be called before PHP is initialized. Returns
+    /// [`SapiError::AlreadyInitialized`] if PHP is already running or
+    /// [`SapiError::AlreadyConfigured`] if `configure` was already called.
+    ///
+    /// Call this from a single thread during startup. `configure` and
+    /// `instance` are not internally synchronized against each other: a
+    /// `configure` racing a concurrent `instance` may be silently ignored
+    /// (the engine reads defaults before the config lands). This matches the
+    /// non-ZTS, single-threaded-init contract of the crate.
+    pub fn configure(config: SapiConfig) -> Result<(), SapiError> {
+        if PHP_INIT_RESULT.get().is_some() {
+            return Err(SapiError::AlreadyInitialized);
+        }
+        SAPI_CONFIG
+            .set(config)
+            .map_err(|_| SapiError::AlreadyConfigured)
+    }
+
     // Note: will panic if initialization fails
     #[must_use]
     pub fn instance() -> Self {
@@ -91,12 +120,17 @@ impl RiphtSapi {
             #[cfg(feature = "tracing")]
             info!("Initializing RiphtSapi");
 
+            let config = SAPI_CONFIG.get().cloned().unwrap_or_default();
+            let resolved = config.resolve()?;
+            let resolved = RESOLVED_CONFIG.get_or_init(|| resolved);
+
             // SAFETY: One-time PHP engine initialization via OnceLock.
             // All pointers/callbacks are static or 'static and remain valid.
+            // ResolvedConfig fields are Box::leak'd to 'static.
             unsafe {
-                ffi::sapi_module.name = SAPI_NAME.as_ptr() as *mut _;
+                ffi::sapi_module.name = resolved.sapi_name.as_ptr() as *mut _;
                 ffi::sapi_module.pretty_name =
-                    SAPI_PRETTY_NAME.as_ptr() as *mut _;
+                    resolved.pretty_name.as_ptr() as *mut _;
 
                 // Register callbacks
                 ffi::sapi_module.startup = Some(callbacks::ripht_sapi_startup);
@@ -130,8 +164,15 @@ impl RiphtSapi {
                     Some(callbacks::ripht_sapi_get_request_time);
                 ffi::sapi_module.getenv = Some(callbacks::ripht_sapi_getenv);
 
-                ffi::sapi_module.php_ini_ignore = 0;
-                ffi::sapi_module.php_ini_ignore_cwd = 1;
+                ffi::sapi_module.php_ini_ignore =
+                    i32::from(resolved.ignore_php_ini);
+                ffi::sapi_module.php_ini_ignore_cwd =
+                    i32::from(resolved.ignore_cwd_ini);
+
+                if let Some(ini_path) = resolved.ini_path {
+                    ffi::sapi_module.php_ini_path_override =
+                        ini_path.as_ptr() as *mut _;
+                }
 
                 ffi::sapi_module.input_filter =
                     Some(callbacks::ripht_sapi_input_filter);
@@ -140,7 +181,8 @@ impl RiphtSapi {
                 ffi::sapi_module.treat_data =
                     Some(callbacks::ripht_sapi_treat_data);
 
-                ffi::sapi_module.ini_entries = INI_ENTRIES.as_ptr() as *const _;
+                ffi::sapi_module.ini_entries =
+                    resolved.ini_entries.as_ptr() as *const _;
 
                 #[cfg(feature = "tracing")]
                 trace!("Starting SAPI");

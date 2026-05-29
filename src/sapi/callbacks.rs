@@ -21,7 +21,7 @@ use tracing::{debug, error, info, trace, warn};
 
 use super::ffi;
 use super::server_context::ServerContext;
-use super::SERVER_SOFTWARE;
+use super::RESOLVED_CONFIG;
 use crate::execution::{ExecutionMessage, ResponseHeader};
 
 const HTTP_STATUS_MIN: i32 = 100;
@@ -237,11 +237,11 @@ pub unsafe extern "C" fn ripht_sapi_register_server_variables(
     }
 
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        register_var_static(
-            track_vars_array,
-            c"SERVER_SOFTWARE",
-            SERVER_SOFTWARE,
-        );
+        let sw = RESOLVED_CONFIG
+            .get()
+            .map(|c| c.server_software)
+            .unwrap_or("Ripht/unknown");
+        register_var_static(track_vars_array, c"SERVER_SOFTWARE", sw);
 
         let Some(ctx_ptr) = get_context() else {
             return;
@@ -265,7 +265,7 @@ unsafe fn register_var_static(array: *mut ffi::zval, name: &CStr, value: &str) {
         ffi::php_register_variable_safe(
             name.as_ptr(),
             value_cstr.as_ptr(),
-            value.len(),
+            value_cstr.as_bytes().len(),
             array,
         );
     }
