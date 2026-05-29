@@ -37,7 +37,7 @@ pub use adapters::{
     WebRequest, WebRequestError,
 };
 
-pub use sapi::{ExecutionError, Executor, RiphtSapi, SapiError};
+pub use sapi::{ExecutionError, Executor, RiphtSapi, SapiConfig, SapiError};
 
 pub use execution::{
     ExecutionContext, ExecutionHooks, ExecutionMessage, ExecutionResult,
@@ -49,7 +49,8 @@ pub mod prelude {
         AdapterError, CliRequest, CliRequestError, ExecutionContext,
         ExecutionHooks, ExecutionMessage, ExecutionResult, Executor, Method,
         NoOpHooks, OutputAction, PhpSapiAdapter, ResponseHeader, RiphtSapi,
-        SapiError, StreamingCallback, SyslogLevel, WebRequest, WebRequestError,
+        SapiConfig, SapiError, StreamingCallback, SyslogLevel, WebRequest,
+        WebRequestError,
     };
 
     #[cfg(feature = "http")]
