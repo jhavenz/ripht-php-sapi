@@ -26,6 +26,7 @@ pub(crate) mod callbacks;
 pub mod config;
 mod executor;
 pub(crate) mod ffi;
+pub(crate) mod native_functions;
 pub(crate) mod server_context;
 pub(crate) mod server_vars;
 
@@ -183,6 +184,9 @@ impl RiphtSapi {
 
                 ffi::sapi_module.ini_entries =
                     resolved.ini_entries.as_ptr() as *const _;
+
+                ffi::sapi_module.additional_functions =
+                    native_functions::entries().as_ptr();
 
                 #[cfg(feature = "tracing")]
                 trace!("Starting SAPI");

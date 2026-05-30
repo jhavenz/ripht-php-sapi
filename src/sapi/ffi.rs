@@ -17,6 +17,9 @@ pub const ZEND_INI_USER: c_int = 1;
 pub const ZEND_INI_SYSTEM: c_int = 4;
 pub const ZEND_INI_STAGE_RUNTIME: c_int = 16;
 
+pub const IS_LONG: u32 = 4;
+pub const IS_STRING_EX: u32 = 6 | (1 << 2);
+
 #[cfg(unix)]
 pub type uid_t = libc::uid_t;
 #[cfg(not(unix))]
@@ -37,8 +40,30 @@ pub struct zend_stat_t {
 }
 
 #[repr(C)]
+pub union zend_value {
+    pub lval: i64,
+    pub dval: f64,
+    pub str: *mut zend_string,
+    pub ptr: *mut c_void,
+}
+
+#[repr(C)]
 pub struct zval {
-    _opaque: [u8; 16],
+    pub value: zend_value,
+    pub type_info: u32,
+    pub _u2: u32,
+}
+
+impl zval {
+    pub unsafe fn set_long(&mut self, val: i64) {
+        self.value.lval = val;
+        self.type_info = IS_LONG;
+    }
+
+    pub unsafe fn set_string(&mut self, s: *mut zend_string) {
+        self.value.str = s;
+        self.type_info = IS_STRING_EX;
+    }
 }
 
 #[repr(C)]
@@ -97,9 +122,37 @@ impl Default for zend_llist {
     }
 }
 
+pub type zif_handler = Option<
+    unsafe extern "C" fn(execute_data: *mut c_void, return_value: *mut zval),
+>;
+
 #[repr(C)]
 pub struct zend_function_entry {
-    _private: [u8; 0],
+    pub fname: *const c_char,
+    pub handler: zif_handler,
+    pub arg_info: *const c_void,
+    pub num_args: u32,
+    pub flags: u32,
+    pub frameless_function_infos: *const c_void,
+    pub doc_comment: *const c_char,
+}
+
+// SAFETY: zend_function_entry is a read-only static table registered once at MINIT.
+// The raw pointers within point to static data (function names, handler fns).
+unsafe impl Sync for zend_function_entry {}
+
+impl zend_function_entry {
+    pub const fn end() -> Self {
+        Self {
+            fname: std::ptr::null(),
+            handler: None,
+            arg_info: std::ptr::null(),
+            num_args: 0,
+            flags: 0,
+            frameless_function_infos: std::ptr::null(),
+            doc_comment: std::ptr::null(),
+        }
+    }
 }
 
 #[repr(C)]
@@ -343,8 +396,37 @@ impl Default for zend_file_handle {
 }
 
 #[repr(C)]
+pub struct zend_refcounted_h {
+    pub refcount: u32,
+    pub type_info: u32,
+}
+
+#[repr(C)]
 pub struct zend_string {
-    _private: [u8; 0],
+    pub gc: zend_refcounted_h,
+    pub h: u64,
+    pub len: usize,
+    pub val: [c_char; 1],
+}
+
+// SAFETY: zend_string is variable-length (val extends past the struct).
+// Allocate with _emalloc(_ZSTR_STRUCT_SIZE(len)), then memcpy.
+pub const GC_STRING: u32 = 6;
+
+pub unsafe fn zend_string_init_rust(s: &[u8]) -> *mut zend_string {
+    let struct_size = std::mem::size_of::<zend_string>() - 1 + s.len() + 1;
+    let aligned = (struct_size + 7) & !7;
+    let ptr = _emalloc(aligned) as *mut zend_string;
+
+    (*ptr).gc.refcount = 1;
+    (*ptr).gc.type_info = GC_STRING | (1 << 8);
+    (*ptr).h = 0;
+    (*ptr).len = s.len();
+
+    std::ptr::copy_nonoverlapping(s.as_ptr(), (*ptr).val.as_mut_ptr() as *mut u8, s.len());
+    *((*ptr).val.as_mut_ptr().add(s.len())) = 0;
+
+    ptr
 }
 
 // Function pointer exported by PHP for creating interned zend_string values.
@@ -396,6 +478,8 @@ extern "C" {
         val_len: usize,
         new_val_len: *mut usize,
     ) -> c_uint;
+    pub fn _emalloc(size: usize) -> *mut c_void;
+
     pub fn php_register_variable_safe(
         var_name: *const c_char,
         val: *const c_char,
