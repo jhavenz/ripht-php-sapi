@@ -67,9 +67,8 @@ fn main() {
         );
     }
 
-    // libphp.a linked with +whole-archive by the consuming binary crate.
-    // Not linked here — the binary crate controls link order with deps.
-    println!("Linking against (deferred): {}", libphp_path.display());
+    println!("cargo:rustc-link-lib=static=php");
+    println!("Linking against: {}", libphp_path.display());
 
     link_php_dependencies(&lib_dir);
     link_platform_libraries();
