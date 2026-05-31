@@ -64,6 +64,52 @@ impl zval {
         self.value.str = s;
         self.type_info = IS_STRING_EX;
     }
+
+    pub unsafe fn set_null(&mut self) {
+        self.type_info = 1;
+    }
+
+    pub fn ztype(&self) -> u32 {
+        self.type_info & 0xFF
+    }
+
+    pub unsafe fn as_long(&self) -> Option<i64> {
+        if self.ztype() == IS_LONG { Some(self.value.lval) } else { None }
+    }
+
+    pub unsafe fn as_str(&self) -> Option<&[u8]> {
+        if self.ztype() != 6 {
+            return None;
+        }
+
+        let s = self.value.str;
+
+        if s.is_null() {
+            return None;
+        }
+
+        let len = (*s).len;
+        let ptr = (*s).val.as_ptr() as *const u8;
+
+        Some(std::slice::from_raw_parts(ptr, len))
+    }
+}
+
+pub unsafe fn call_num_args(execute_data: *mut c_void) -> u32 {
+    // num_args is in the This.u2 field of zend_execute_data.
+    // This is a zval at offset 32 bytes (4 pointers) into the struct.
+    // u2 is at offset 12 within the zval (after 8-byte value + 4-byte type_info).
+    let ptr = (execute_data as *const u8).add(32 + 12) as *const u32;
+
+    *ptr
+}
+
+pub unsafe fn call_arg(execute_data: *mut c_void, n: usize) -> *mut zval {
+    // ZEND_CALL_FRAME_SLOT = (sizeof(zend_execute_data) + 15) / 16 = 5
+    // Args start at ((zval*)execute_data) + FRAME_SLOT + (n-1)
+    let base = execute_data as *mut zval;
+
+    base.add(5 + n - 1)
 }
 
 #[repr(C)]
