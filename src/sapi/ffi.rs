@@ -74,7 +74,11 @@ impl zval {
     }
 
     pub unsafe fn as_long(&self) -> Option<i64> {
-        if self.ztype() == IS_LONG { Some(self.value.lval) } else { None }
+        if self.ztype() == IS_LONG {
+            Some(self.value.lval)
+        } else {
+            None
+        }
     }
 
     pub unsafe fn as_str(&self) -> Option<&[u8]> {
@@ -104,7 +108,10 @@ pub unsafe fn call_num_args(execute_data: *mut c_void) -> u32 {
     *ptr
 }
 
-pub unsafe fn call_arg(execute_data: *mut c_void, n: usize) -> *mut zval {
+pub unsafe fn call_arg_unchecked(
+    execute_data: *mut c_void,
+    n: usize,
+) -> *mut zval {
     // ZEND_CALL_FRAME_SLOT = (sizeof(zend_execute_data) + 15) / 16 = 5
     // Args start at ((zval*)execute_data) + FRAME_SLOT + (n-1)
     let base = execute_data as *mut zval;
@@ -173,6 +180,7 @@ pub type zif_handler = Option<
 >;
 
 #[repr(C)]
+#[derive(Clone, Copy, Debug)]
 pub struct zend_function_entry {
     pub fname: *const c_char,
     pub handler: zif_handler,
@@ -186,6 +194,7 @@ pub struct zend_function_entry {
 // SAFETY: zend_function_entry is a read-only static table registered once at MINIT.
 // The raw pointers within point to static data (function names, handler fns).
 unsafe impl Sync for zend_function_entry {}
+unsafe impl Send for zend_function_entry {}
 
 impl zend_function_entry {
     pub const fn end() -> Self {
@@ -469,8 +478,15 @@ pub unsafe fn zend_string_init_rust(s: &[u8]) -> *mut zend_string {
     (*ptr).h = 0;
     (*ptr).len = s.len();
 
-    std::ptr::copy_nonoverlapping(s.as_ptr(), (*ptr).val.as_mut_ptr() as *mut u8, s.len());
-    *((*ptr).val.as_mut_ptr().add(s.len())) = 0;
+    std::ptr::copy_nonoverlapping(
+        s.as_ptr(),
+        (*ptr).val.as_mut_ptr() as *mut u8,
+        s.len(),
+    );
+    *((*ptr)
+        .val
+        .as_mut_ptr()
+        .add(s.len())) = 0;
 
     ptr
 }

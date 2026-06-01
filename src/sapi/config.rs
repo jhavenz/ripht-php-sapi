@@ -9,6 +9,9 @@
 
 use std::ffi::{CStr, CString};
 
+use super::ffi::zend_function_entry;
+use super::native::Function as NativeFunction;
+use super::native_functions;
 use super::SapiError;
 
 const DEFAULT_SAPI_NAME: &str = "ripht";
@@ -41,6 +44,7 @@ pub struct SapiConfig {
     pub ignore_php_ini: bool,
     pub ignore_cwd_ini: bool,
     pub ini_path: Option<String>,
+    native_functions: Vec<zend_function_entry>,
 }
 
 impl Default for SapiConfig {
@@ -56,6 +60,7 @@ impl Default for SapiConfig {
             ignore_php_ini: false,
             ignore_cwd_ini: true,
             ini_path: None,
+            native_functions: Vec::new(),
         }
     }
 }
@@ -85,10 +90,7 @@ impl SapiConfig {
     }
 
     #[must_use]
-    pub fn ini_entries(
-        mut self,
-        entries: Vec<(String, String)>,
-    ) -> Self {
+    pub fn ini_entries(mut self, entries: Vec<(String, String)>) -> Self {
         self.ini_entries = entries;
         self
     }
@@ -99,7 +101,8 @@ impl SapiConfig {
         key: impl Into<String>,
         value: impl Into<String>,
     ) -> Self {
-        self.ini_entries.push((key.into(), value.into()));
+        self.ini_entries
+            .push((key.into(), value.into()));
         self
     }
 
@@ -118,6 +121,20 @@ impl SapiConfig {
     #[must_use]
     pub fn ini_path(mut self, path: impl Into<String>) -> Self {
         self.ini_path = Some(path.into());
+        self
+    }
+
+    #[must_use]
+    pub fn native_functions(
+        mut self,
+        entries: &'static [NativeFunction],
+    ) -> Self {
+        self.native_functions = entries
+            .iter()
+            .copied()
+            .map(NativeFunction::entry)
+            .take_while(|entry| !entry.fname.is_null())
+            .collect();
         self
     }
 
@@ -140,16 +157,24 @@ impl SapiConfig {
         }
         let sapi_name = leak_null_terminated(self.sapi_name);
 
-        if self.pretty_name.contains('\0') {
+        if self
+            .pretty_name
+            .contains('\0')
+        {
             return Err(SapiError::InvalidPrettyName(self.pretty_name));
         }
         let pretty_name = leak_null_terminated(self.pretty_name);
 
-        if self.server_software.contains('\0') {
+        if self
+            .server_software
+            .contains('\0')
+        {
             return Err(SapiError::InvalidServerSoftware(self.server_software));
         }
-        let server_software: &'static str =
-            Box::leak(self.server_software.into_boxed_str());
+        let server_software: &'static str = Box::leak(
+            self.server_software
+                .into_boxed_str(),
+        );
 
         let mut ini_blob = String::new();
         for (key, value) in &self.ini_entries {
@@ -168,12 +193,22 @@ impl SapiConfig {
 
         let ini_path = match self.ini_path {
             Some(path) => {
-                let cstring =
-                    CString::new(path).map_err(|_| SapiError::InvalidIniPath)?;
+                let cstring = CString::new(path)
+                    .map_err(|_| SapiError::InvalidIniPath)?;
                 Some(Box::leak(cstring.into_boxed_c_str()) as &'static CStr)
             }
             None => None,
         };
+
+        let mut native_entries: Vec<zend_function_entry> =
+            native_functions::entries()
+                .iter()
+                .copied()
+                .take_while(|entry| !entry.fname.is_null())
+                .collect();
+        native_entries.extend(self.native_functions);
+        native_entries.push(zend_function_entry::end());
+        let native_functions = Box::leak(native_entries.into_boxed_slice());
 
         Ok(ResolvedConfig {
             sapi_name,
@@ -183,6 +218,7 @@ impl SapiConfig {
             ignore_php_ini: self.ignore_php_ini,
             ignore_cwd_ini: self.ignore_cwd_ini,
             ini_path,
+            native_functions,
         })
     }
 }
@@ -197,6 +233,7 @@ pub(crate) struct ResolvedConfig {
     pub ignore_php_ini: bool,
     pub ignore_cwd_ini: bool,
     pub ini_path: Option<&'static CStr>,
+    pub native_functions: &'static [zend_function_entry],
 }
 
 #[cfg(test)]
@@ -222,7 +259,12 @@ mod tests {
 
     #[test]
     fn default_ini_entries_count() {
-        assert_eq!(SapiConfig::default().ini_entries.len(), 7);
+        assert_eq!(
+            SapiConfig::default()
+                .ini_entries
+                .len(),
+            7
+        );
     }
 
     #[test]
@@ -260,28 +302,30 @@ mod tests {
 
     #[test]
     fn ini_entry_appends() {
-        let config =
-            SapiConfig::new().ini_entry("custom_key", "custom_value");
+        let config = SapiConfig::new().ini_entry("custom_key", "custom_value");
         assert_eq!(config.ini_entries.len(), 8);
         assert_eq!(
-            config.ini_entries.last().unwrap(),
+            config
+                .ini_entries
+                .last()
+                .unwrap(),
             &("custom_key".to_owned(), "custom_value".to_owned())
         );
     }
 
     #[test]
     fn ini_entries_replaces_all() {
-        let config = SapiConfig::new().ini_entries(vec![(
-            "only".to_owned(),
-            "one".to_owned(),
-        )]);
+        let config = SapiConfig::new()
+            .ini_entries(vec![("only".to_owned(), "one".to_owned())]);
         assert_eq!(config.ini_entries.len(), 1);
     }
 
     #[test]
     fn resolve_null_terminates_sapi_name() {
-        let resolved =
-            SapiConfig::new().sapi_name("test").resolve().unwrap();
+        let resolved = SapiConfig::new()
+            .sapi_name("test")
+            .resolve()
+            .unwrap();
         assert_eq!(resolved.sapi_name, b"test\0");
     }
 
@@ -308,27 +352,34 @@ mod tests {
 
     #[test]
     fn resolve_empty_ini_blob() {
-        let resolved =
-            SapiConfig::new().ini_entries(vec![]).resolve().unwrap();
+        let resolved = SapiConfig::new()
+            .ini_entries(vec![])
+            .resolve()
+            .unwrap();
         assert_eq!(resolved.ini_entries, b"\0");
     }
 
     #[test]
     fn resolve_rejects_null_in_sapi_name() {
-        let result = SapiConfig::new().sapi_name("te\0st").resolve();
+        let result = SapiConfig::new()
+            .sapi_name("te\0st")
+            .resolve();
         assert!(matches!(result, Err(SapiError::InvalidSapiName(_))));
     }
 
     #[test]
     fn resolve_rejects_null_in_pretty_name() {
-        let result = SapiConfig::new().pretty_name("My\0SAPI").resolve();
+        let result = SapiConfig::new()
+            .pretty_name("My\0SAPI")
+            .resolve();
         assert!(matches!(result, Err(SapiError::InvalidPrettyName(_))));
     }
 
     #[test]
     fn resolve_rejects_null_in_server_software() {
-        let result =
-            SapiConfig::new().server_software("Bad\0/1.0").resolve();
+        let result = SapiConfig::new()
+            .server_software("Bad\0/1.0")
+            .resolve();
         assert!(matches!(result, Err(SapiError::InvalidServerSoftware(_))));
     }
 
@@ -350,7 +401,9 @@ mod tests {
 
     #[test]
     fn resolve_rejects_null_in_ini_path() {
-        let result = SapiConfig::new().ini_path("/etc/ph\0p.ini").resolve();
+        let result = SapiConfig::new()
+            .ini_path("/etc/ph\0p.ini")
+            .resolve();
         assert!(matches!(result, Err(SapiError::InvalidIniPath)));
     }
 
@@ -366,10 +419,14 @@ mod tests {
 
     #[test]
     fn resolve_defaults_match_prior_constants() {
-        let resolved = SapiConfig::default().resolve().unwrap();
+        let resolved = SapiConfig::default()
+            .resolve()
+            .unwrap();
         assert_eq!(resolved.sapi_name, b"ripht\0");
         assert_eq!(resolved.pretty_name, b"Ripht PHP SAPI\0");
-        assert!(resolved.server_software.starts_with("Ripht/"));
+        assert!(resolved
+            .server_software
+            .starts_with("Ripht/"));
         assert!(!resolved.ignore_php_ini);
         assert!(resolved.ignore_cwd_ini);
         assert!(resolved.ini_path.is_none());

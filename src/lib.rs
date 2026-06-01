@@ -37,7 +37,9 @@ pub use adapters::{
     WebRequest, WebRequestError,
 };
 
-pub use sapi::{ExecutionError, Executor, RiphtSapi, SapiConfig, SapiError};
+pub use sapi::{
+    native, ExecutionError, Executor, RiphtSapi, SapiConfig, SapiError,
+};
 
 pub use execution::{
     ExecutionContext, ExecutionHooks, ExecutionMessage, ExecutionResult,

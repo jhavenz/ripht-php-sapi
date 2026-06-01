@@ -26,6 +26,7 @@ pub(crate) mod callbacks;
 pub mod config;
 mod executor;
 pub(crate) mod ffi;
+pub mod native;
 pub(crate) mod native_functions;
 pub(crate) mod server_context;
 pub(crate) mod server_vars;
@@ -34,8 +35,8 @@ pub use config::SapiConfig;
 pub use executor::{ExecutionError, Executor};
 pub(crate) use server_vars::{ServerVars, ServerVarsCString};
 
-use config::ResolvedConfig;
 use crate::execution::{ExecutionContext, ExecutionHooks, ExecutionResult};
+use config::ResolvedConfig;
 
 static PHP_INIT_RESULT: OnceLock<Result<(), SapiError>> = OnceLock::new();
 static SAPI_CONFIG: OnceLock<SapiConfig> = OnceLock::new();
@@ -102,7 +103,10 @@ impl RiphtSapi {
     /// (the engine reads defaults before the config lands). This matches the
     /// non-ZTS, single-threaded-init contract of the crate.
     pub fn configure(config: SapiConfig) -> Result<(), SapiError> {
-        if PHP_INIT_RESULT.get().is_some() {
+        if PHP_INIT_RESULT
+            .get()
+            .is_some()
+        {
             return Err(SapiError::AlreadyInitialized);
         }
         SAPI_CONFIG
@@ -121,7 +125,10 @@ impl RiphtSapi {
             #[cfg(feature = "tracing")]
             info!("Initializing RiphtSapi");
 
-            let config = SAPI_CONFIG.get().cloned().unwrap_or_default();
+            let config = SAPI_CONFIG
+                .get()
+                .cloned()
+                .unwrap_or_default();
             let resolved = config.resolve()?;
             let resolved = RESOLVED_CONFIG.get_or_init(|| resolved);
 
@@ -185,8 +192,9 @@ impl RiphtSapi {
                 ffi::sapi_module.ini_entries =
                     resolved.ini_entries.as_ptr() as *const _;
 
-                ffi::sapi_module.additional_functions =
-                    native_functions::entries().as_ptr();
+                ffi::sapi_module.additional_functions = resolved
+                    .native_functions
+                    .as_ptr();
 
                 #[cfg(feature = "tracing")]
                 trace!("Starting SAPI");
