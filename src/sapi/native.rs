@@ -129,3 +129,72 @@ pub unsafe fn zend_string(value: &[u8]) -> *mut zend_string {
     // SAFETY: guaranteed by the caller.
     unsafe { ffi::zend_string_init_rust(value) }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    unsafe extern "C" fn fake_handler(
+        _execute_data: *mut c_void,
+        _return_value: *mut ReturnValue,
+    ) {
+    }
+
+    #[test]
+    fn function_wraps_static_zend_metadata() {
+        let name = b"ripht_test_native\0";
+
+        // SAFETY: the function name is static, this test does not invoke the handler,
+        // and a null arginfo pointer is enough to validate metadata wrapping.
+        let function = unsafe {
+            Function::new_unchecked(
+                name.as_ptr() as *const c_char,
+                fake_handler,
+                std::ptr::null(),
+                2,
+            )
+        };
+
+        let entry = function.entry();
+
+        assert_eq!(entry.fname, name.as_ptr() as *const c_char);
+        assert_eq!(entry.num_args, 2);
+        assert!(entry.handler.is_some());
+        assert!(entry.arg_info.is_null());
+    }
+
+    #[test]
+    fn call_bounds_arguments_against_php_frame_count() {
+        let mut frame = (0..7)
+            .map(|_| ffi::zval {
+                value: ffi::zend_value { lval: 0 },
+                type_info: 0,
+                _u2: 0,
+            })
+            .collect::<Vec<_>>();
+
+        frame[2]._u2 = 2;
+
+        // SAFETY: the zvals are locally owned and used only for this synthetic frame test.
+        unsafe {
+            frame[5].set_long(10);
+            frame[6].set_long(20);
+        }
+
+        // SAFETY: `frame` is laid out to satisfy the limited call-frame offsets
+        // used by `Call` for num_args and argument lookup.
+        let call = unsafe {
+            Call::from_execute_data(
+                frame
+                    .as_mut_ptr()
+                    .cast::<c_void>(),
+            )
+        };
+
+        assert_eq!(call.num_args(), 2);
+        assert!(call.arg(0).is_none());
+        assert_eq!(call.arg(1).unwrap().as_ptr(), &mut frame[5] as *mut _);
+        assert_eq!(call.arg(2).unwrap().as_ptr(), &mut frame[6] as *mut _);
+        assert!(call.arg(3).is_none());
+    }
+}

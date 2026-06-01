@@ -200,13 +200,18 @@ impl SapiConfig {
             None => None,
         };
 
-        let mut native_entries: Vec<zend_function_entry> =
+        let mut native_entries = if self
+            .native_functions
+            .is_empty()
+        {
             native_functions::entries()
                 .iter()
                 .copied()
                 .take_while(|entry| !entry.fname.is_null())
-                .collect();
-        native_entries.extend(self.native_functions);
+                .collect()
+        } else {
+            self.native_functions
+        };
         native_entries.push(zend_function_entry::end());
         let native_functions = Box::leak(native_entries.into_boxed_slice());
 
@@ -239,6 +244,16 @@ pub(crate) struct ResolvedConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::CStr;
+    use std::os::raw::{c_char, c_void};
+
+    use super::super::native::ReturnValue;
+
+    unsafe extern "C" fn fake_handler(
+        _execute_data: *mut c_void,
+        _return_value: *mut ReturnValue,
+    ) {
+    }
 
     #[test]
     fn default_sapi_name() {
@@ -437,5 +452,45 @@ mod tests {
         .unwrap();
         assert!(ini.contains("variables_order=EGPCS"));
         assert!(ini.contains("log_errors=1"));
+    }
+
+    #[test]
+    fn resolve_uses_custom_native_functions_before_terminator() {
+        static CUSTOM: [NativeFunction; 1] = [
+            // SAFETY: the function name is static, this test does not execute the
+            // handler, and the null arginfo pointer is only used to verify table wiring.
+            unsafe {
+                NativeFunction::new_unchecked(
+                    b"ripht_test_native\0".as_ptr() as *const c_char,
+                    fake_handler,
+                    std::ptr::null(),
+                    0,
+                )
+            },
+        ];
+
+        let resolved = SapiConfig::new()
+            .native_functions(&CUSTOM)
+            .resolve()
+            .unwrap();
+
+        let names = resolved
+            .native_functions
+            .iter()
+            .take_while(|entry| !entry.fname.is_null())
+            .map(|entry| {
+                unsafe { CStr::from_ptr(entry.fname) }
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(names, vec!["ripht_test_native"]);
+        assert!(resolved
+            .native_functions
+            .last()
+            .unwrap()
+            .fname
+            .is_null());
     }
 }
