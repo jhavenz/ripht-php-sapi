@@ -342,7 +342,7 @@ fn test_web_adapter_trait_implementation() {
         .expect("should build successfully");
 
     assert_eq!(context.script_path, script_path);
-    assert!(!context.log_to_stderr); 
+    assert!(!context.log_to_stderr);
 }
 
 #[test]
@@ -388,7 +388,7 @@ fn test_cli_adapter_trait_implementation() {
         .expect("should build successfully");
 
     assert_eq!(context.script_path, script_path);
-    assert!(context.log_to_stderr); 
+    assert!(context.log_to_stderr);
 }
 
 #[test]

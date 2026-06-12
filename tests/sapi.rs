@@ -760,6 +760,23 @@ fn test_streaming_sse_output() {
 }
 
 #[test]
+fn exit_status_reports_php_exit_code() {
+    let php = RiphtSapi::instance();
+    let script_path = php_script_path("shutdown_behavior.php");
+
+    let exec = WebRequest::get()
+        .with_uri("/shutdown_behavior.php?action=exit_code")
+        .build(&script_path)
+        .expect("failed to build exit-code WebRequest");
+    let result = php
+        .execute(exec)
+        .expect("exit-code request execution failed");
+
+    assert_eq!(result.status_code(), 200);
+    assert_eq!(result.exit_status(), 42);
+}
+
+#[test]
 fn test_streaming_large_output() {
     let php = RiphtSapi::instance();
     let script_path = php_script_path("large_output.php");

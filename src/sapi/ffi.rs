@@ -516,6 +516,7 @@ extern "C" {
         dest_array: *mut zval,
     );
     pub fn php_execute_script(primary_file: *mut zend_file_handle) -> c_int;
+    pub fn ripht_php_sapi_exit_status() -> c_int;
     pub fn zend_stream_init_filename(
         handle: *mut zend_file_handle,
         filename: *const c_char,

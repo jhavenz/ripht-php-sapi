@@ -177,6 +177,7 @@ impl<'sapi> Executor<'sapi> {
             trace!("Executing script");
 
             let exec_result = Self::run_script(&script_cstr);
+            let exit_status = ffi::ripht_php_sapi_exit_status();
             let success = exec_result != ffi::FAILURE;
             hooks.on_script_executed(success);
 
@@ -234,6 +235,7 @@ impl<'sapi> Executor<'sapi> {
 
             let result = ExecutionResult::new(
                 status,
+                exit_status,
                 body,
                 headers,
                 server_ctx.messages,

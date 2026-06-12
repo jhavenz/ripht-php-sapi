@@ -9,6 +9,7 @@ use super::message::{ExecutionMessage, SyslogLevel};
 #[derive(Debug, Clone)]
 pub struct ExecutionResult {
     status: u16,
+    exit_status: i32,
     body: Vec<u8>,
     headers: Vec<ResponseHeader>,
     messages: Vec<ExecutionMessage>,
@@ -17,12 +18,14 @@ pub struct ExecutionResult {
 impl ExecutionResult {
     pub fn new(
         status: u16,
+        exit_status: i32,
         body: Vec<u8>,
         headers: Vec<ResponseHeader>,
         messages: Vec<ExecutionMessage>,
     ) -> Self {
         Self {
             status,
+            exit_status,
             body,
             headers,
             messages,
@@ -51,6 +54,10 @@ impl ExecutionResult {
 
     pub fn status_code(&self) -> u16 {
         self.status
+    }
+
+    pub fn exit_status(&self) -> i32 {
+        self.exit_status
     }
 
     pub fn has_errors(&self) -> bool {
@@ -124,6 +131,7 @@ impl Default for ExecutionResult {
     fn default() -> Self {
         Self {
             status: 200,
+            exit_status: 0,
             body: Vec::new(),
             headers: Vec::new(),
             messages: Vec::new(),

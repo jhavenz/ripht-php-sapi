@@ -72,6 +72,7 @@ fn main() {
 
     link_php_dependencies(&lib_dir);
     link_platform_libraries();
+    compile_exit_status_shim(&prefix);
     generate_bindgen_validation(&prefix);
 }
 
@@ -155,28 +156,45 @@ fn link_platform_libraries() {
     }
 }
 
+fn compile_exit_status_shim(php_prefix: &Path) {
+    use std::fs;
+
+    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let Some(include_dir) = php_include_dir(php_prefix) else {
+        println!(
+            "cargo:warning=PHP headers not found, skipping exit-status shim"
+        );
+        return;
+    };
+
+    let shim_path = out_dir.join("exit_status_shim.c");
+    fs::write(
+        &shim_path,
+        r#"#include <main/php.h>
+
+int ripht_php_sapi_exit_status(void) {
+    return EG(exit_status);
+}
+"#,
+    )
+    .expect("Failed to write exit-status shim");
+
+    cc::Build::new()
+        .file(&shim_path)
+        .include(&include_dir)
+        .include(include_dir.join("main"))
+        .include(include_dir.join("Zend"))
+        .include(include_dir.join("TSRM"))
+        .compile("ripht_exit_status_shim");
+}
+
 fn generate_bindgen_validation(php_prefix: &Path) {
     use std::fs;
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let output_path = out_dir.join("bindgen_validation.rs");
 
-    let include_candidates = [
-        php_prefix
-            .join("include")
-            .join("php"),
-        php_prefix.join("php"),
-    ];
-
-    let include_dir = include_candidates
-        .iter()
-        .find(|p| {
-            p.join("main")
-                .join("SAPI.h")
-                .exists()
-        });
-
-    let Some(include_dir) = include_dir else {
+    let Some(include_dir) = php_include_dir(php_prefix) else {
         println!("cargo:warning=PHP SAPI.h not found, writing stub bindgen_validation.rs");
         fs::write(
             &output_path,
@@ -260,4 +278,21 @@ fn generate_bindgen_validation(php_prefix: &Path) {
             .expect("Failed to write error stub");
         }
     }
+}
+
+fn php_include_dir(php_prefix: &Path) -> Option<PathBuf> {
+    let include_candidates = [
+        php_prefix
+            .join("include")
+            .join("php"),
+        php_prefix.join("php"),
+    ];
+
+    include_candidates
+        .into_iter()
+        .find(|p| {
+            p.join("main")
+                .join("SAPI.h")
+                .exists()
+        })
 }

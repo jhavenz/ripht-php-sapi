@@ -41,7 +41,7 @@ Add the crate to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-ripht-php-sapi = "0.1.0-rc.5"
+ripht-php-sapi = "0.1.0-rc.9"
 ```
 
 Example usage:

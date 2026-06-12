@@ -2,7 +2,10 @@ use std::os::raw::{c_char, c_void};
 
 use super::ffi::{self, zend_function_entry, zval};
 
-unsafe extern "C" fn zif_dory_rust_ping(_execute_data: *mut c_void, return_value: *mut zval) {
+unsafe extern "C" fn zif_dory_rust_ping(
+    _execute_data: *mut c_void,
+    return_value: *mut zval,
+) {
     (*return_value).set_string(ffi::zend_string_init_rust(b"pong"));
 }
 

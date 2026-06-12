@@ -1,6 +1,6 @@
 [package]
 name = "ripht-php-sapi"
-version = "0.1.0-rc.8"
+version = "0.1.0-rc.9"
 edition = "2021"
 authors = ["Jonathan Havens <mail@jhavens.tech>"]
 repository = "https://github.com/jhavenz/ripht-php-sapi"
@@ -39,6 +39,7 @@ harness = false
 
 [build-dependencies]
 bindgen = "0.72"
+cc = "1.2"
 
 [features]
 default = ["serde", "http"]

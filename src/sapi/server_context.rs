@@ -240,6 +240,7 @@ impl ServerContext {
     pub fn into_result(self, body: Vec<u8>) -> ExecutionResult {
         ExecutionResult::new(
             self.status_code.get(),
+            0,
             body,
             self.response_headers,
             self.messages,

@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.0-rc.9] - 2026-06-12
+
+### Added
+- `ExecutionResult::exit_status()` exposes PHP's engine exit status after
+  script execution.
+
+### Changed
+- `ExecutionResult::new(...)` now requires an `exit_status` argument.
+
 ## [0.1.0-rc.8] - 2026-05-27
 
 ### Added
