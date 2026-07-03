@@ -54,6 +54,10 @@ impl Function {
     pub(crate) const fn entry(self) -> zend_function_entry {
         self.entry
     }
+
+    pub const fn required_num_args(&self) -> u32 {
+        self.entry.num_args
+    }
 }
 
 pub struct Call<'frame> {
@@ -161,6 +165,7 @@ mod tests {
         assert_eq!(entry.num_args, 2);
         assert!(entry.handler.is_some());
         assert!(entry.arg_info.is_null());
+        assert_eq!(function.required_num_args(), 2);
     }
 
     #[test]

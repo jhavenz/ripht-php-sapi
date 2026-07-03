@@ -98,15 +98,15 @@ pub unsafe extern "C" fn ripht_sapi_ub_write(
         return 0;
     }
 
-    if ffi::sapi_globals.headers_sent == 0 {
-        ffi::sapi_send_headers();
-    }
-
-    let Some(ctx_ptr) = get_context() else {
-        return 0;
-    };
-
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if ffi::sapi_globals.headers_sent == 0 {
+            ffi::sapi_send_headers();
+        }
+
+        let Some(ctx_ptr) = get_context() else {
+            return 0;
+        };
+
         let bytes = std::slice::from_raw_parts(str as *const u8, str_length);
 
         #[cfg(feature = "tracing")]
@@ -121,18 +121,18 @@ pub unsafe extern "C" fn ripht_sapi_ub_write(
 /// Flush output callback.
 #[no_mangle]
 pub unsafe extern "C" fn ripht_sapi_flush(_server_context: *mut c_void) {
-    #[cfg(feature = "tracing")]
-    trace!("Flush called");
-
-    if ffi::sapi_globals.headers_sent == 0 {
-        ffi::sapi_send_headers();
-    }
-
-    let Some(ctx_ptr) = get_context() else {
-        return;
-    };
-
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        #[cfg(feature = "tracing")]
+        trace!("Flush called");
+
+        if ffi::sapi_globals.headers_sent == 0 {
+            ffi::sapi_send_headers();
+        }
+
+        let Some(ctx_ptr) = get_context() else {
+            return;
+        };
+
         (*ctx_ptr).flush();
     }));
 }
@@ -313,7 +313,11 @@ pub unsafe extern "C" fn ripht_sapi_input_filter(
     _val_len: usize,
     _new_val_len: *mut usize,
 ) -> c_uint {
-    ffi::php_default_input_filter(_arg, _var, _val, _val_len, _new_val_len)
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        ffi::php_default_input_filter(_arg, _var, _val, _val_len, _new_val_len)
+    }));
+
+    result.unwrap_or(0)
 }
 
 /// Log message callback (errors, warnings, notices).
@@ -322,21 +326,21 @@ pub unsafe extern "C" fn ripht_sapi_log_message(
     message: *const c_char,
     syslog_type: c_int,
 ) {
-    if message.is_null() {
-        return;
-    }
-
-    let msg = CStr::from_ptr(message).to_string_lossy();
-
-    let should_log_to_stderr = get_context()
-        .map(|ctx_ptr| (*ctx_ptr).log_to_stderr)
-        .unwrap_or(false);
-
-    if should_log_to_stderr {
-        eprintln!("{}", msg);
-    }
-
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if message.is_null() {
+            return;
+        }
+
+        let msg = CStr::from_ptr(message).to_string_lossy();
+
+        let should_log_to_stderr = get_context()
+            .map(|ctx_ptr| (*ctx_ptr).log_to_stderr)
+            .unwrap_or(false);
+
+        if should_log_to_stderr {
+            eprintln!("{msg}");
+        }
+
         #[cfg(feature = "tracing")]
         match syslog_type {
             0..=3 => error!(message = %msg, "PHP error"),
