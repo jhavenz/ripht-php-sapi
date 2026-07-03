@@ -214,8 +214,10 @@ impl<'sapi> Executor<'sapi> {
                 hooks.on_php_message(message);
             }
 
-            let body = match hooks.on_output(&server_ctx.output_buffer) {
-                OutputAction::Continue => server_ctx.output_buffer,
+            let output = server_ctx.take_response_output();
+
+            let body = match hooks.on_output(&output) {
+                OutputAction::Continue => output,
                 OutputAction::Done => Vec::new(),
             };
 

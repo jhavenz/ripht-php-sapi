@@ -45,6 +45,25 @@ pub(crate) unsafe fn get_context() -> Option<*mut ServerContext> {
     Some(ptr)
 }
 
+pub fn finish_current_request() -> bool {
+    let result =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
+            if ffi::sapi_globals.headers_sent == 0 {
+                ffi::sapi_send_headers();
+            }
+
+            let Some(ctx_ptr) = get_context() else {
+                return false;
+            };
+
+            (*ctx_ptr).finalize_response();
+
+            true
+        }));
+
+    result.unwrap_or(false)
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn ripht_sapi_startup(
     _module: *mut ffi::sapi_module_struct,

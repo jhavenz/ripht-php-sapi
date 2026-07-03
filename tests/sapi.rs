@@ -35,6 +35,32 @@ fn execute_hello_php() {
 }
 
 #[test]
+fn fastcgi_finish_request_finalizes_response_once() {
+    let php = RiphtSapi::instance();
+    let script_path = php_script_path("fastcgi_finish.php");
+
+    let exec = WebRequest::get()
+        .build(&script_path)
+        .expect("failed to build WebRequest");
+
+    let result = php
+        .execute(exec)
+        .expect("fastcgi_finish.php execution failed");
+
+    let json: serde_json::Value = serde_json::from_slice(&result.body())
+        .expect("finalized response body should be valid JSON");
+
+    assert_eq!(json["available"], true);
+    assert!(result
+        .body_string()
+        .contains("available"));
+    assert!(!result
+        .body_string()
+        .contains("after"));
+    assert_eq!(result.header_val("X-Ripht-Finalized"), Some("yes"));
+}
+
+#[test]
 fn post_request_works() {
     let php = RiphtSapi::instance();
     let script_path = php_script_path("post_form.php");

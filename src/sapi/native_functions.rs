@@ -1,12 +1,26 @@
 use std::os::raw::{c_char, c_void};
 
+use super::callbacks;
 use super::ffi::{self, zend_function_entry, zval};
 
 unsafe extern "C" fn zif_dory_rust_ping(
     _execute_data: *mut c_void,
     return_value: *mut zval,
 ) {
-    (*return_value).set_string(ffi::zend_string_init_rust(b"pong"));
+    let bytes = std::panic::catch_unwind(|| b"pong".as_slice())
+        .unwrap_or(b"".as_slice());
+
+    (*return_value).set_string(ffi::zend_string_init_rust(bytes));
+}
+
+unsafe extern "C" fn zif_fastcgi_finish_request(
+    _execute_data: *mut c_void,
+    return_value: *mut zval,
+) {
+    let finished = std::panic::catch_unwind(callbacks::finish_current_request)
+        .unwrap_or(false);
+
+    (*return_value).set_long(i64::from(finished));
 }
 
 #[repr(C)]
@@ -39,8 +53,14 @@ macro_rules! func_entry {
 }
 
 pub fn entries() -> &'static [zend_function_entry] {
-    static ENTRIES: [zend_function_entry; 2] = [
+    static ENTRIES: [zend_function_entry; 3] = [
         func_entry!(b"dory_rust_ping\0", zif_dory_rust_ping, ARGINFO_0, 0),
+        func_entry!(
+            b"fastcgi_finish_request\0",
+            zif_fastcgi_finish_request,
+            ARGINFO_0,
+            0
+        ),
         zend_function_entry::end(),
     ];
 

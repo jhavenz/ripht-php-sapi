@@ -200,18 +200,12 @@ impl SapiConfig {
             None => None,
         };
 
-        let mut native_entries = if self
-            .native_functions
-            .is_empty()
-        {
-            native_functions::entries()
-                .iter()
-                .copied()
-                .take_while(|entry| !entry.fname.is_null())
-                .collect()
-        } else {
-            self.native_functions
-        };
+        let mut native_entries = native_functions::entries()
+            .iter()
+            .copied()
+            .take_while(|entry| !entry.fname.is_null())
+            .collect::<Vec<_>>();
+        native_entries.extend(self.native_functions);
         native_entries.push(zend_function_entry::end());
         let native_functions = Box::leak(native_entries.into_boxed_slice());
 
@@ -455,7 +449,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_uses_custom_native_functions_before_terminator() {
+    fn resolve_appends_custom_native_functions_before_terminator() {
         static CUSTOM: [NativeFunction; 1] = [
             // SAFETY: the function name is static, this test does not execute the
             // handler, and the null arginfo pointer is only used to verify table wiring.
@@ -485,7 +479,14 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        assert_eq!(names, vec!["ripht_test_native"]);
+        assert_eq!(
+            names,
+            vec![
+                "dory_rust_ping",
+                "fastcgi_finish_request",
+                "ripht_test_native"
+            ]
+        );
         assert!(resolved
             .native_functions
             .last()

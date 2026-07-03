@@ -85,6 +85,15 @@ pub enum SapiError {
     LibraryNotFound,
 }
 
+/// Finalizes the active PHP request response, if one is currently executing.
+///
+/// This is intended for host native functions that provide compatibility with
+/// PHP runtimes such as FastCGI. It is a no-op outside an active request and
+/// never unwinds across the caller's native boundary.
+pub fn finish_current_request() -> bool {
+    callbacks::finish_current_request()
+}
+
 /// PHP SAPI instance. Initialize once, execute scripts repeatedly.
 pub struct RiphtSapi {
     _marker: std::marker::PhantomData<*mut ()>,

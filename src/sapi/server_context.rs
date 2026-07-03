@@ -63,9 +63,11 @@ type OutputCallback = Box<dyn FnMut(&[u8])>;
 /// overhead, making the aliasing pattern well-defined per Rust's memory model.
 pub struct ServerContext {
     status_code: Cell<u16>,
+    response_finalized: Cell<bool>,
     pub post_data: Vec<u8>,
     post_position: Cell<usize>,
     pub output_buffer: Vec<u8>,
+    finalized_output: Vec<u8>,
     pub messages: Vec<ExecutionMessage>,
     pub vars: Option<ServerVarsCString>,
     pub env_vars: Vec<(CString, CString)>,
@@ -90,7 +92,9 @@ impl ServerContext {
             post_data: Vec::new(),
             post_position: Cell::new(0),
             output_buffer: Vec::with_capacity(policy.initial_cap),
+            finalized_output: Vec::new(),
             status_code: Cell::new(200),
+            response_finalized: Cell::new(false),
             messages: Vec::with_capacity(8),
             vars: None,
             env_vars: Vec::new(),
@@ -163,6 +167,10 @@ impl ServerContext {
     }
 
     pub fn write_output(&mut self, data: &[u8]) -> usize {
+        if self.response_finalized.get() {
+            return data.len();
+        }
+
         if let Some(ref mut callback) = self.output_callback {
             callback(data);
 
@@ -227,6 +235,26 @@ impl ServerContext {
     pub fn flush(&mut self) {
         if let Some(ref mut callback) = self.flush_callback {
             callback();
+        }
+    }
+
+    pub fn finalize_response(&mut self) {
+        if self
+            .response_finalized
+            .replace(true)
+        {
+            return;
+        }
+
+        self.finalized_output = std::mem::take(&mut self.output_buffer);
+        self.flush();
+    }
+
+    pub fn take_response_output(&mut self) -> Vec<u8> {
+        if self.response_finalized.get() {
+            std::mem::take(&mut self.finalized_output)
+        } else {
+            std::mem::take(&mut self.output_buffer)
         }
     }
 
