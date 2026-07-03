@@ -238,16 +238,17 @@ impl ServerContext {
         }
     }
 
-    pub fn finalize_response(&mut self) {
+    pub fn finalize_response(&mut self) -> bool {
         if self
             .response_finalized
             .replace(true)
         {
-            return;
+            return false;
         }
 
         self.finalized_output = std::mem::take(&mut self.output_buffer);
         self.flush();
+        true
     }
 
     pub fn take_response_output(&mut self) -> Vec<u8> {

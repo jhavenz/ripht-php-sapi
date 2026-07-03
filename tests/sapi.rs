@@ -38,8 +38,20 @@ fn execute_hello_php() {
 fn fastcgi_finish_request_finalizes_response_once() {
     let php = RiphtSapi::instance();
     let script_path = php_script_path("fastcgi_finish.php");
+    let result_path = std::env::temp_dir().join(format!(
+        "ripht-fastcgi-finish-{}-{}.json",
+        std::process::id(),
+        "finalizes-response-once"
+    ));
+    let _ = std::fs::remove_file(&result_path);
 
     let exec = WebRequest::get()
+        .with_env(
+            "RIPHT_FASTCGI_FINISH_RESULT",
+            result_path
+                .to_string_lossy()
+                .into_owned(),
+        )
         .build(&script_path)
         .expect("failed to build WebRequest");
 
@@ -51,6 +63,7 @@ fn fastcgi_finish_request_finalizes_response_once() {
         .expect("finalized response body should be valid JSON");
 
     assert_eq!(json["available"], true);
+    assert_eq!(json["pre"], true);
     assert!(result
         .body_string()
         .contains("available"));
@@ -58,6 +71,17 @@ fn fastcgi_finish_request_finalizes_response_once() {
         .body_string()
         .contains("after"));
     assert_eq!(result.header_val("X-Ripht-Finalized"), Some("yes"));
+
+    let returns: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(&result_path)
+            .expect("fastcgi_finish.php should write return-value sidecar"),
+    )
+    .expect("return-value sidecar should be valid JSON");
+
+    assert_eq!(returns["first"], true);
+    assert_eq!(returns["second"], false);
+
+    let _ = std::fs::remove_file(result_path);
 }
 
 #[test]

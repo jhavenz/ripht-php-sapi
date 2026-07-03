@@ -96,9 +96,10 @@ impl<'sapi> Executor<'sapi> {
             Self::setup_globals(&*ctx_ptr);
 
             if ffi::php_request_startup() == ffi::FAILURE {
-                let _ = Box::from_raw(ctx_ptr);
                 ffi::php_request_shutdown(std::ptr::null_mut());
                 ffi::sapi_globals.server_context = std::ptr::null_mut();
+                let _ = Box::from_raw(ctx_ptr);
+                Self::cleanup_globals();
                 return Err(ExecutionError::StartupFailed);
             }
 
@@ -162,9 +163,10 @@ impl<'sapi> Executor<'sapi> {
             if startup_result == ffi::FAILURE {
                 #[cfg(feature = "tracing")]
                 error!("Request startup failed");
-                let _ = Box::from_raw(ctx_ptr);
                 ffi::php_request_shutdown(std::ptr::null_mut());
                 ffi::sapi_globals.server_context = std::ptr::null_mut();
+                let _ = Box::from_raw(ctx_ptr);
+                Self::cleanup_globals();
                 return Err(ExecutionError::StartupFailed);
             }
 

@@ -48,6 +48,8 @@ pub(crate) unsafe fn get_context() -> Option<*mut ServerContext> {
 pub fn finish_current_request() -> bool {
     let result =
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
+            ffi::php_output_flush_all();
+
             if ffi::sapi_globals.headers_sent == 0 {
                 ffi::sapi_send_headers();
             }
@@ -56,9 +58,7 @@ pub fn finish_current_request() -> bool {
                 return false;
             };
 
-            (*ctx_ptr).finalize_response();
-
-            true
+            (*ctx_ptr).finalize_response()
         }));
 
     result.unwrap_or(false)

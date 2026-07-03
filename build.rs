@@ -121,6 +121,19 @@ fn link_php_dependencies(lib_dir: &Path) {
     let core_libs = ["charset", "iconv", "z"];
     let db_libs = ["sqlite3", "pgcommon", "pgport", "pq"];
     let icu_libs = ["icudata", "icuuc", "icuio", "icutu", "icui18n"];
+    let extension_libs = [
+        "brotli",
+        "brotlicommon",
+        "brotlidec",
+        "brotlienc",
+        "cares",
+        "ffi",
+        "lzma",
+        "nghttp2",
+        "sodium",
+        "yaml",
+        "zstd",
+    ];
 
     for lib in core_libs
         .iter()
@@ -133,6 +146,7 @@ fn link_php_dependencies(lib_dir: &Path) {
         .chain(text_libs.iter())
         .chain(terminal_libs.iter())
         .chain(icu_libs.iter())
+        .chain(extension_libs.iter())
     {
         let lib_file = format!("lib{}.a", lib);
         if lib_dir

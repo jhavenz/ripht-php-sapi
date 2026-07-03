@@ -17,6 +17,8 @@ pub const ZEND_INI_USER: c_int = 1;
 pub const ZEND_INI_SYSTEM: c_int = 4;
 pub const ZEND_INI_STAGE_RUNTIME: c_int = 16;
 
+pub const IS_FALSE: u32 = 2;
+pub const IS_TRUE: u32 = 3;
 pub const IS_LONG: u32 = 4;
 pub const IS_STRING_EX: u32 = 6 | (1 << 2);
 
@@ -58,6 +60,10 @@ impl zval {
     pub unsafe fn set_long(&mut self, val: i64) {
         self.value.lval = val;
         self.type_info = IS_LONG;
+    }
+
+    pub unsafe fn set_bool(&mut self, val: bool) {
+        self.type_info = if val { IS_TRUE } else { IS_FALSE };
     }
 
     pub unsafe fn set_string(&mut self, s: *mut zend_string) {
@@ -510,6 +516,7 @@ extern "C" {
     pub fn php_module_shutdown();
     pub fn php_request_startup() -> c_int;
     pub fn php_request_shutdown(dummy: *mut c_void);
+    pub fn php_output_flush_all();
     pub fn php_default_treat_data(
         arg: c_int,
         str: *mut c_char,
