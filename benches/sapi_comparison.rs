@@ -138,7 +138,7 @@ fn run_suite(c: &mut Criterion, suite: &BenchSuite) {
         }
     }
 
-    if support::should_run_frankenphp_sapi() {
+    if shared::should_run_frankenphp_sapi() {
         if let Some(mut backend) = FrankenPhpBackend::start() {
             group.bench_function(backend.name(), |b| {
                 b.iter(|| {

@@ -138,7 +138,7 @@ fn bench_ipc_echo(c: &mut Criterion) {
     let mut pool = Pool::from_env();
 
     for (name, size) in [("small", 32usize), ("large", 256 * 1024)] {
-        let mut group = c.benchmark_group(&format!("ipc_echo_{}", name));
+        let mut group = c.benchmark_group(format!("ipc_echo_{}", name));
         group.throughput(Throughput::Bytes(size as u64));
 
         group.bench_function("msgpack_pipe", |b| {

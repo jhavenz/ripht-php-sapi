@@ -239,7 +239,7 @@ pub(crate) struct ResolvedConfig {
 mod tests {
     use super::*;
     use std::ffi::CStr;
-    use std::os::raw::{c_char, c_void};
+    use std::os::raw::c_void;
 
     use super::super::native::ReturnValue;
 
@@ -455,7 +455,7 @@ mod tests {
             // handler, and the null arginfo pointer is only used to verify table wiring.
             unsafe {
                 NativeFunction::new_unchecked(
-                    b"ripht_test_native\0".as_ptr() as *const c_char,
+                    c"ripht_test_native".as_ptr(),
                     fake_handler,
                     std::ptr::null(),
                     0,

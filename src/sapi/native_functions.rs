@@ -33,7 +33,7 @@ struct ArgInfoHeader {
 unsafe impl Sync for ArgInfoHeader {}
 
 static ARGINFO_0: [ArgInfoHeader; 1] = [ArgInfoHeader {
-    name: 0usize as *const c_char,
+    name: std::ptr::null(),
     type_info: [0; 16],
     default_value: std::ptr::null(),
 }];

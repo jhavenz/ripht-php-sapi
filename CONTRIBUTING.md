@@ -63,10 +63,8 @@ cargo build
 Tests must run serially because PHP NTS is not thread-safe:
 
 ```bash
-cargo test
+RUST_TEST_THREADS=1 cargo test
 ```
-
-The `.cargo/config.toml` already sets `RUST_TEST_THREADS=1`.
 
 ### Running Examples
 

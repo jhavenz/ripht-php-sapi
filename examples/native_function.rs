@@ -4,7 +4,6 @@
 
 use std::fs;
 use std::os::raw::{c_char, c_void};
-use std::path::PathBuf;
 
 use ripht_php_sapi::native::{Function, ReturnValue};
 use ripht_php_sapi::{native, RiphtSapi, SapiConfig, WebRequest};
@@ -46,7 +45,7 @@ const fn string_type() -> ZendType {
 }
 
 static ARGINFO: [ArgInfo; 1] = [ArgInfo {
-    name: 0usize as *const c_char,
+    name: std::ptr::null(),
     type_info: string_type(),
     default_value: std::ptr::null(),
 }];
@@ -57,7 +56,7 @@ fn native_functions() -> &'static [Function] {
         // the handler uses PHP's native function calling convention.
         unsafe {
             Function::new_unchecked(
-                b"dory_native_greeting\0".as_ptr() as *const c_char,
+                c"dory_native_greeting".as_ptr(),
                 zif_dory_custom_ping,
                 ARGINFO.as_ptr() as *const c_void,
                 0,
@@ -75,7 +74,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .native_functions(native_functions()),
     )?;
 
-    let script_path = PathBuf::from(std::env::temp_dir())
+    let script_path = std::env::temp_dir()
         .join(format!("ripht-native-function-{}.php", std::process::id()));
     fs::write(&script_path, "<?php echo dory_native_greeting();")?;
 

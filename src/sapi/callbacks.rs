@@ -48,15 +48,15 @@ pub(crate) unsafe fn get_context() -> Option<*mut ServerContext> {
 pub fn finish_current_request() -> bool {
     let result =
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
+            let Some(ctx_ptr) = get_context() else {
+                return false;
+            };
+
             ffi::php_output_flush_all();
 
             if ffi::sapi_globals.headers_sent == 0 {
                 ffi::sapi_send_headers();
             }
-
-            let Some(ctx_ptr) = get_context() else {
-                return false;
-            };
 
             (*ctx_ptr).finalize_response()
         }));
@@ -517,6 +517,15 @@ mod tests {
             let _ = Box::from_raw(ctx_ptr);
             super::ffi::sapi_globals.server_context = std::ptr::null_mut();
         }
+    }
+
+    #[test]
+    fn finish_current_request_without_active_context_is_noop() {
+        unsafe {
+            super::ffi::sapi_globals.server_context = std::ptr::null_mut();
+        }
+
+        assert!(!finish_current_request());
     }
 
     #[test]
