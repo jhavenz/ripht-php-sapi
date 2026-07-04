@@ -8,23 +8,16 @@ Thank you for your interest in contributing! This document covers development se
 
 This crate requires PHP built with `--enable-embed=static` (and typically `--disable-zts` for NTS builds).
 
-#### Option A: Static PHP CLI (Optional convenience for development)
+#### Option A: Shared Static PHP CLI/Bia Prefix
 
-[Static PHP CLI](https://github.com/crazywhalecc/static-php-cli) can simplify building PHP with the embed SAPI (optional):
+[Static PHP CLI](https://github.com/crazywhalecc/static-php-cli) can simplify building PHP with the embed SAPI. For local development, prefer installing the generated prefix at `~/.ripht/php` so multiple Rust/PHP tools can share one static PHP build.
 
 ```bash
-# Install spc (macOS example)
-curl -fsSL https://dl.static-php.dev/spc-bin/nightly/spc-macos-x86_64 -o spc
-chmod +x spc
-
-# Build PHP with embed SAPI (adjust flags as needed)
-./spc doctor --auto-fix
-./spc download --with-php=8.3 --for-extensions=... # install desired extensions
-./spc build php-src --build-embed
-
-# Set the prefix (adjust path based on your spc output)
-# e.g., export RIPHT_PHP_SAPI_PREFIX=$HOME/.spc/buildroot
+# From the Phalanx libs/bia directory, this installs the shared local prefix and keeps SPC build/cache files out of project repos.
+BIA_STATIC_PHP_PREFIX="$HOME/.ripht/php" SPC_WORK_DIR="$HOME/.ripht/spc-work" BIA_ALLOW_UNMARKED_PREFIX=1 ./scripts/build-static-engine.sh
 ```
+
+Ripht automatically checks `~/.ripht/php` when `RIPHT_PHP_SAPI_PREFIX` is not set. Bia/static-php-cli prefixes should include `lib/bia-link-flags.txt`; Ripht consumes that linker manifest when present.
 
 #### Option B: Manual PHP Build
 
@@ -54,7 +47,6 @@ export RIPHT_PHP_SAPI_PREFIX=$HOME/.ripht/php
 ### Building the Crate
 
 ```bash
-# Ensure RIPHT_PHP_SAPI_PREFIX is set, or install PHP to a fallback location
 cargo build
 ```
 

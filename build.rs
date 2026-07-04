@@ -8,6 +8,10 @@
 //! - `lib/libphp.a` (PHP embed SAPI built as static library)
 //! - `include/php/` (PHP headers for FFI validation)
 //!
+//! If the prefix also contains `lib/bia-link-flags.txt`, that linker manifest is
+//! used instead of heuristic dependency scanning. This is the preferred path for
+//! Static PHP CLI/Bia-generated prefixes.
+//!
 //! Configure which PHP build to use via environment variables:
 //! - `RIPHT_PHP_SAPI_PREFIX` - Path to PHP build root
 //!
@@ -27,11 +31,14 @@
 //! When `DOCS_RS` is set (docs.rs builds), this script skips all PHP discovery/linking.
 
 use std::env;
+use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-env-changed=RIPHT_PHP_SAPI_PREFIX");
+    println!("cargo:rerun-if-env-changed=CC");
     println!("cargo:rustc-check-cfg=cfg(bindgen_available)");
 
     if env::var("DOCS_RS").is_ok() {
@@ -58,6 +65,9 @@ fn main() {
         println!("cargo:rustc-link-search=native={}", lib_dir.display());
     }
 
+    let link_flags = lib_dir.join("bia-link-flags.txt");
+    println!("cargo:rerun-if-changed={}", link_flags.display());
+
     let libphp_path = lib_dir.join("libphp.a");
     if !libphp_path.exists() {
         panic!(
@@ -67,11 +77,18 @@ fn main() {
         );
     }
 
-    println!("cargo:rustc-link-lib=static=php");
     println!("Linking against: {}", libphp_path.display());
 
-    link_php_dependencies(&lib_dir);
-    link_platform_libraries();
+    if link_flags.is_file() {
+        println!("Using PHP linker manifest: {}", link_flags.display());
+        emit_link_flags(&link_flags);
+        emit_macos_compiler_runtime();
+    } else {
+        println!("cargo:rustc-link-lib=static=php");
+        link_php_dependencies(&lib_dir);
+        link_platform_libraries();
+    }
+
     compile_exit_status_shim(&prefix);
     generate_bindgen_validation(&prefix);
 }
@@ -108,6 +125,159 @@ fn validate_php_prefix(prefix: &Path) -> bool {
             .join("lib")
             .join("libphp.a")
             .exists()
+}
+
+fn emit_link_flags(path: &Path) {
+    let manifest =
+        fs::read_to_string(path).expect("failed to read PHP linker manifest");
+
+    for line in manifest.lines() {
+        let Some((_, value)) = line.split_once('=') else {
+            continue;
+        };
+
+        emit_tokens(&split_shell_words(value));
+    }
+}
+
+fn emit_tokens(tokens: &[String]) {
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+
+    if target_os == "linux" {
+        emit_linux_tokens(tokens);
+
+        return;
+    }
+
+    emit_cargo_tokens(tokens, &target_os);
+}
+
+fn emit_macos_compiler_runtime() {
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+
+    if target_os != "macos" {
+        return;
+    }
+
+    let clang = env::var_os("CC").unwrap_or_else(|| "clang".into());
+    let Ok(output) = Command::new(clang)
+        .arg("-print-file-name=libclang_rt.osx.a")
+        .output()
+    else {
+        return;
+    };
+
+    if !output.status.success() {
+        return;
+    }
+
+    let path = String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .to_string();
+
+    if path.is_empty()
+        || path == "libclang_rt.osx.a"
+        || !Path::new(&path).is_file()
+    {
+        return;
+    }
+
+    println!("cargo:rustc-link-arg={path}");
+}
+
+fn emit_linux_tokens(tokens: &[String]) {
+    for token in tokens {
+        if token.starts_with("-L") && token.len() > 2 {
+            println!("cargo:rustc-link-search=native={}", &token[2..]);
+        }
+    }
+
+    println!("cargo:rustc-link-arg=-Wl,--start-group");
+
+    for token in tokens {
+        if token.starts_with("-l") && token.len() > 2 {
+            println!("cargo:rustc-link-arg={token}");
+        }
+    }
+
+    println!("cargo:rustc-link-arg=-Wl,--end-group");
+
+    for token in tokens {
+        match token.as_str() {
+            "-pthread" => println!("cargo:rustc-link-arg=-pthread"),
+            token if token.starts_with("-Wl,") => {
+                println!("cargo:rustc-link-arg={token}")
+            }
+            _ => {}
+        }
+    }
+}
+
+fn emit_cargo_tokens(tokens: &[String], target_os: &str) {
+    let mut i = 0;
+
+    while i < tokens.len() {
+        match tokens[i].as_str() {
+            "-framework" => {
+                if let Some(name) = tokens.get(i + 1) {
+                    println!("cargo:rustc-link-lib=framework={name}");
+                    i += 2;
+                    continue;
+                }
+            }
+            "-pthread" => {
+                println!("cargo:rustc-link-arg=-pthread");
+            }
+            token if token.starts_with("-L") && token.len() > 2 => {
+                println!("cargo:rustc-link-search=native={}", &token[2..]);
+            }
+            token if token.starts_with("-l") && token.len() > 2 => {
+                let lib = &token[2..];
+
+                if target_os == "macos" && lib == "stdc++" {
+                    i += 1;
+                    continue;
+                }
+
+                println!("cargo:rustc-link-lib={lib}");
+            }
+            token => {
+                println!("cargo:rustc-link-arg={token}");
+            }
+        }
+
+        i += 1;
+    }
+}
+
+fn split_shell_words(value: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut quote = None;
+
+    for ch in value.chars() {
+        match (quote, ch) {
+            (Some(active), ch) if ch == active => {
+                quote = None;
+            }
+            (Some(_), ch) => current.push(ch),
+            (None, '\'' | '"') => {
+                quote = Some(ch);
+            }
+            (None, ch) if ch.is_whitespace() => {
+                if !current.is_empty() {
+                    words.push(std::mem::take(&mut current));
+                }
+            }
+            (None, ch) => current.push(ch),
+        }
+    }
+
+    if !current.is_empty() {
+        words.push(current);
+    }
+
+    words
 }
 
 fn link_php_dependencies(lib_dir: &Path) {

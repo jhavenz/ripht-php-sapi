@@ -3,8 +3,8 @@
 #### Build
 
 # Path to PHP build root containing lib/libphp.a (REQUIRED)
-# Set this to your PHP installation, or install to ~/.ripht/php, ~/.local/php, or /usr/local
-RIPHT_PHP_SAPI_PREFIX = "/path/to/php"
+# Omit this when using the recommended ~/.ripht/php fallback.
+#RIPHT_PHP_SAPI_PREFIX = "/path/to/php-prefix"
 
 #### Benchmarking 
 
