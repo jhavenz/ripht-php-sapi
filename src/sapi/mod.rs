@@ -28,6 +28,7 @@ mod executor;
 pub(crate) mod ffi;
 pub mod native;
 pub(crate) mod native_functions;
+pub(crate) mod response;
 pub(crate) mod server_context;
 pub(crate) mod server_vars;
 
@@ -161,6 +162,10 @@ impl RiphtSapi {
                 ffi::sapi_module.ub_write =
                     Some(callbacks::ripht_sapi_ub_write);
                 ffi::sapi_module.flush = Some(callbacks::ripht_sapi_flush);
+                ffi::sapi_module.sapi_error = Some(callbacks::ripht_sapi_error);
+
+                ffi::sapi_module.header_handler =
+                    Some(callbacks::ripht_sapi_header_handler);
 
                 ffi::sapi_module.send_headers =
                     Some(callbacks::ripht_sapi_send_headers);

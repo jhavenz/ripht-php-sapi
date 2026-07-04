@@ -5,6 +5,10 @@ use std::sync::OnceLock;
 use crate::execution::{
     ExecutionContext, ExecutionMessage, ExecutionResult, ResponseHeader,
 };
+use crate::sapi::response::{
+    AbortReason, BufferedResponseSink, ResponseLifecycle, ResponseSink,
+    SinkResult,
+};
 use crate::sapi::ServerVarsCString;
 
 const MIN_BUFFER_SIZE: usize = 4096;
@@ -63,11 +67,10 @@ type OutputCallback = Box<dyn FnMut(&[u8])>;
 /// overhead, making the aliasing pattern well-defined per Rust's memory model.
 pub struct ServerContext {
     status_code: Cell<u16>,
-    response_finalized: Cell<bool>,
+    response: ResponseLifecycle,
+    sink: BufferedResponseSink,
     pub post_data: Vec<u8>,
     post_position: Cell<usize>,
-    pub output_buffer: Vec<u8>,
-    finalized_output: Vec<u8>,
     pub messages: Vec<ExecutionMessage>,
     pub vars: Option<ServerVarsCString>,
     pub env_vars: Vec<(CString, CString)>,
@@ -91,10 +94,9 @@ impl ServerContext {
         Self {
             post_data: Vec::new(),
             post_position: Cell::new(0),
-            output_buffer: Vec::with_capacity(policy.initial_cap),
-            finalized_output: Vec::new(),
             status_code: Cell::new(200),
-            response_finalized: Cell::new(false),
+            response: ResponseLifecycle::default(),
+            sink: BufferedResponseSink::with_capacity(policy.initial_cap),
             messages: Vec::with_capacity(8),
             vars: None,
             env_vars: Vec::new(),
@@ -167,7 +169,7 @@ impl ServerContext {
     }
 
     pub fn write_output(&mut self, data: &[u8]) -> usize {
-        if self.response_finalized.get() {
+        if !self.response.can_write() {
             return data.len();
         }
 
@@ -177,8 +179,8 @@ impl ServerContext {
             return data.len();
         }
 
-        let actual_buffer_length = self.output_buffer.capacity();
-        let required_buffer_length = self.output_buffer.len() + data.len();
+        let actual_buffer_length = self.sink.capacity();
+        let required_buffer_length = self.sink.len() + data.len();
 
         if required_buffer_length > actual_buffer_length {
             let policy = buffer_policy();
@@ -199,18 +201,61 @@ impl ServerContext {
                 }
             };
 
-            self.output_buffer
-                .reserve(new_cap - self.output_buffer.len());
+            self.sink
+                .reserve(new_cap - self.sink.len());
         }
 
-        self.output_buffer
-            .extend_from_slice(data);
+        let _ = self.sink.write(data);
         data.len()
     }
 
     pub fn add_header(&mut self, header: ResponseHeader) {
+        if self
+            .response
+            .headers_finalized()
+        {
+            return;
+        }
+
         self.response_headers
             .push(header);
+    }
+
+    pub fn start_headers(&mut self, code: u16) -> bool {
+        if self
+            .response
+            .headers_finalized()
+        {
+            return false;
+        }
+
+        self.set_status(code);
+        self.response_headers.clear();
+        true
+    }
+
+    pub(crate) fn headers_finalized(&self) -> bool {
+        self.response
+            .headers_finalized()
+    }
+
+    pub fn finalize_headers(&mut self) -> bool {
+        if !self
+            .response
+            .finalize_headers()
+        {
+            return false;
+        }
+
+        let result = self
+            .sink
+            .send_headers(self.status_code(), &self.response_headers);
+
+        if matches!(result, SinkResult::Abort) {
+            self.abort_response(AbortReason::SinkFailure);
+        }
+
+        true
     }
 
     pub fn set_status(&self, code: u16) {
@@ -233,30 +278,51 @@ impl ServerContext {
     }
 
     pub fn flush(&mut self) {
+        if !self.response.can_flush() {
+            return;
+        }
+
+        if matches!(self.sink.flush(), SinkResult::Abort) {
+            self.abort_response(AbortReason::SinkFailure);
+            return;
+        }
+
         if let Some(ref mut callback) = self.flush_callback {
             callback();
         }
     }
 
     pub fn finalize_response(&mut self) -> bool {
-        if self
-            .response_finalized
-            .replace(true)
-        {
+        if !self.response.finish() {
             return false;
         }
 
-        self.finalized_output = std::mem::take(&mut self.output_buffer);
-        self.flush();
+        let result = self.sink.finish();
+        if matches!(result, SinkResult::Abort) {
+            self.abort_response(AbortReason::SinkFailure);
+            return false;
+        }
+
+        debug_assert!(self.sink.is_finished());
+
+        if let Some(ref mut callback) = self.flush_callback {
+            callback();
+        }
+
         true
     }
 
     pub fn take_response_output(&mut self) -> Vec<u8> {
-        if self.response_finalized.get() {
-            std::mem::take(&mut self.finalized_output)
-        } else {
-            std::mem::take(&mut self.output_buffer)
+        self.sink.take_output()
+    }
+
+    pub(crate) fn abort_response(&mut self, reason: AbortReason) -> bool {
+        if !self.response.abort(reason) {
+            return false;
         }
+
+        self.sink.abort(reason);
+        true
     }
 
     pub fn get_env(&self, key: &[u8]) -> Option<*const std::ffi::c_char> {

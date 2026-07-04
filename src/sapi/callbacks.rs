@@ -137,6 +137,34 @@ pub unsafe extern "C" fn ripht_sapi_flush(_server_context: *mut c_void) {
     }));
 }
 
+#[no_mangle]
+pub unsafe extern "C" fn ripht_sapi_error(
+    _error_type: c_int,
+    _error_msg: *const c_char,
+) {
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn ripht_sapi_header_handler(
+    _sapi_header: *mut ffi::sapi_header_struct,
+    _op: c_int,
+    _sapi_headers: *mut ffi::sapi_headers_struct,
+) -> c_int {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let Some(ctx_ptr) = get_context() else {
+            return ffi::SAPI_HEADER_ADD;
+        };
+
+        if (*ctx_ptr).headers_finalized() {
+            return 0;
+        }
+
+        ffi::SAPI_HEADER_ADD
+    }));
+
+    result.unwrap_or(0)
+}
+
 /// Send all response headers callback.
 #[no_mangle]
 pub unsafe extern "C" fn ripht_sapi_send_headers(
@@ -159,10 +187,9 @@ pub unsafe extern "C" fn ripht_sapi_send_headers(
                 status as u16
             };
 
-        (*ctx_ptr).set_status(status_code);
-        (*ctx_ptr)
-            .response_headers
-            .clear();
+        if !(*ctx_ptr).start_headers(status_code) {
+            return ffi::SAPI_HEADER_SENT_SUCCESSFULLY;
+        }
 
         // Iterate PHP's header list
         let mut elem = (*sapi_headers).headers.head;
@@ -172,6 +199,8 @@ pub unsafe extern "C" fn ripht_sapi_send_headers(
             ripht_sapi_send_header(header_ptr, std::ptr::null_mut());
             elem = (*elem).next;
         }
+
+        (*ctx_ptr).finalize_headers();
 
         ffi::SAPI_HEADER_SENT_SUCCESSFULLY
     }));

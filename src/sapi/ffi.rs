@@ -12,6 +12,7 @@ pub const SUCCESS: c_int = 0;
 pub const FAILURE: c_int = -1;
 pub const SAPI_HEADER_SENT_SUCCESSFULLY: c_int = 1;
 pub const SAPI_HEADER_SEND_FAILED: c_int = 0;
+pub const SAPI_HEADER_ADD: c_int = 1;
 pub const ZEND_HANDLE_FILENAME: u8 = 0;
 pub const ZEND_INI_USER: c_int = 1;
 pub const ZEND_INI_SYSTEM: c_int = 4;
