@@ -8,11 +8,8 @@ pub(crate) enum SinkResult {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
 pub(crate) enum AbortReason {
     ClientClosed,
-    DeadlineExceeded,
-    HostAbort,
     SinkFailure,
 }
 
@@ -61,12 +58,16 @@ impl ResponseLifecycle {
     }
 
     pub(crate) fn finish(&mut self) -> bool {
-        if self.response_finished || self.response_aborted {
+        if !self.can_finish() {
             return false;
         }
 
         self.response_finished = true;
         true
+    }
+
+    pub(crate) fn can_finish(&self) -> bool {
+        !self.response_finished && !self.response_aborted
     }
 
     pub(crate) fn abort(&mut self, reason: AbortReason) -> bool {
@@ -220,19 +221,11 @@ mod tests {
         let mut response = ResponseLifecycle::default();
         let mut sink = BufferedResponseSink::with_capacity(16);
 
-        assert!(response.abort(AbortReason::HostAbort));
-        sink.abort(AbortReason::HostAbort);
+        assert!(response.abort(AbortReason::SinkFailure));
+        sink.abort(AbortReason::SinkFailure);
         assert!(!response.finish());
         assert_eq!(sink.write(b"after"), SinkResult::Abort);
         assert_eq!(sink.take_output(), b"");
-        assert_eq!(response.abort_reason(), Some(AbortReason::HostAbort));
-    }
-
-    #[test]
-    fn response_state_names_cover_planned_results() {
-        let _ = SinkResult::Closed;
-        let _ = AbortReason::ClientClosed;
-        let _ = AbortReason::DeadlineExceeded;
-        let _ = AbortReason::SinkFailure;
+        assert_eq!(response.abort_reason(), Some(AbortReason::SinkFailure));
     }
 }

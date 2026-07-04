@@ -11,7 +11,7 @@ use std::os::raw::{c_char, c_double, c_int, c_uint, c_void};
 pub const SUCCESS: c_int = 0;
 pub const FAILURE: c_int = -1;
 pub const SAPI_HEADER_SENT_SUCCESSFULLY: c_int = 1;
-pub const SAPI_HEADER_SEND_FAILED: c_int = 0;
+pub const SAPI_HEADER_SEND_FAILED: c_int = 3;
 pub const SAPI_HEADER_ADD: c_int = 1;
 pub const ZEND_HANDLE_FILENAME: u8 = 0;
 pub const ZEND_INI_USER: c_int = 1;
@@ -320,7 +320,7 @@ pub struct sapi_module_struct {
     pub get_stat: Option<unsafe extern "C" fn() -> *mut zend_stat_t>,
     pub getenv:
         Option<unsafe extern "C" fn(*const c_char, usize) -> *mut c_char>,
-    pub sapi_error: Option<unsafe extern "C" fn(c_int, *const c_char)>,
+    pub sapi_error: Option<unsafe extern "C" fn(c_int, *const c_char, ...)>,
     pub header_handler: Option<
         unsafe extern "C" fn(
             *mut sapi_header_struct,
@@ -517,7 +517,7 @@ extern "C" {
     pub fn php_module_shutdown();
     pub fn php_request_startup() -> c_int;
     pub fn php_request_shutdown(dummy: *mut c_void);
-    pub fn php_output_flush_all();
+    pub fn php_output_end_all();
     pub fn php_default_treat_data(
         arg: c_int,
         str: *mut c_char,
@@ -525,6 +525,11 @@ extern "C" {
     );
     pub fn php_execute_script(primary_file: *mut zend_file_handle) -> c_int;
     pub fn ripht_php_sapi_exit_status() -> c_int;
+    pub fn ripht_sapi_error_shim(
+        error_type: c_int,
+        error_msg: *const c_char,
+        ...
+    );
     pub fn zend_stream_init_filename(
         handle: *mut zend_file_handle,
         filename: *const c_char,
@@ -565,6 +570,16 @@ extern "C" {
 
     pub static mut sapi_module: sapi_module_struct;
     pub static mut sapi_globals: sapi_globals_struct;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sapi_header_send_failed_matches_php_header_value() {
+        assert_eq!(SAPI_HEADER_SEND_FAILED, 3);
+    }
 }
 
 #[cfg(all(test, bindgen_available))]

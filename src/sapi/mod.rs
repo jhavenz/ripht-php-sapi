@@ -162,7 +162,7 @@ impl RiphtSapi {
                 ffi::sapi_module.ub_write =
                     Some(callbacks::ripht_sapi_ub_write);
                 ffi::sapi_module.flush = Some(callbacks::ripht_sapi_flush);
-                ffi::sapi_module.sapi_error = Some(callbacks::ripht_sapi_error);
+                ffi::sapi_module.sapi_error = Some(ffi::ripht_sapi_error_shim);
 
                 ffi::sapi_module.header_handler =
                     Some(callbacks::ripht_sapi_header_handler);

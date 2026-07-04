@@ -17,4 +17,3 @@ file_put_contents(getenv('RIPHT_FASTCGI_LATE_OUTPUT_PATH'), json_encode([
     'finished' => $finished,
     'marker' => 'late-output-complete',
 ]));
-

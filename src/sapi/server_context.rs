@@ -205,7 +205,16 @@ impl ServerContext {
                 .reserve(new_cap - self.sink.len());
         }
 
-        let _ = self.sink.write(data);
+        match self.sink.write(data) {
+            SinkResult::Continue => {}
+            SinkResult::Closed => {
+                self.abort_response(AbortReason::ClientClosed);
+            }
+            SinkResult::Abort => {
+                self.abort_response(AbortReason::SinkFailure);
+            }
+        }
+
         data.len()
     }
 
@@ -251,11 +260,17 @@ impl ServerContext {
             .sink
             .send_headers(self.status_code(), &self.response_headers);
 
-        if matches!(result, SinkResult::Abort) {
-            self.abort_response(AbortReason::SinkFailure);
+        match result {
+            SinkResult::Continue => true,
+            SinkResult::Closed => {
+                self.abort_response(AbortReason::ClientClosed);
+                false
+            }
+            SinkResult::Abort => {
+                self.abort_response(AbortReason::SinkFailure);
+                false
+            }
         }
-
-        true
     }
 
     pub fn set_status(&self, code: u16) {
@@ -282,9 +297,16 @@ impl ServerContext {
             return;
         }
 
-        if matches!(self.sink.flush(), SinkResult::Abort) {
-            self.abort_response(AbortReason::SinkFailure);
-            return;
+        match self.sink.flush() {
+            SinkResult::Continue => {}
+            SinkResult::Closed => {
+                self.abort_response(AbortReason::ClientClosed);
+                return;
+            }
+            SinkResult::Abort => {
+                self.abort_response(AbortReason::SinkFailure);
+                return;
+            }
         }
 
         if let Some(ref mut callback) = self.flush_callback {
@@ -293,13 +315,23 @@ impl ServerContext {
     }
 
     pub fn finalize_response(&mut self) -> bool {
-        if !self.response.finish() {
+        if !self.response.can_finish() {
             return false;
         }
 
-        let result = self.sink.finish();
-        if matches!(result, SinkResult::Abort) {
-            self.abort_response(AbortReason::SinkFailure);
+        match self.sink.finish() {
+            SinkResult::Continue => {}
+            SinkResult::Closed => {
+                self.abort_response(AbortReason::ClientClosed);
+                return false;
+            }
+            SinkResult::Abort => {
+                self.abort_response(AbortReason::SinkFailure);
+                return false;
+            }
+        }
+
+        if !self.response.finish() {
             return false;
         }
 

@@ -10,4 +10,3 @@ file_put_contents(getenv('RIPHT_FASTCGI_MARKER_PATH'), json_encode([
     'finished' => $finished,
     'marker' => 'after-finish',
 ]));
-

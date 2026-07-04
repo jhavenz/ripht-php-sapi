@@ -89,7 +89,7 @@ fn main() {
         link_platform_libraries();
     }
 
-    compile_exit_status_shim(&prefix);
+    compile_sapi_shim(&prefix);
     generate_bindgen_validation(&prefix);
 }
 
@@ -340,28 +340,32 @@ fn link_platform_libraries() {
     }
 }
 
-fn compile_exit_status_shim(php_prefix: &Path) {
+fn compile_sapi_shim(php_prefix: &Path) {
     use std::fs;
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let Some(include_dir) = php_include_dir(php_prefix) else {
-        println!(
-            "cargo:warning=PHP headers not found, skipping exit-status shim"
-        );
+        println!("cargo:warning=PHP headers not found, skipping SAPI shim");
         return;
     };
 
-    let shim_path = out_dir.join("exit_status_shim.c");
+    let shim_path = out_dir.join("ripht_sapi_shim.c");
     fs::write(
         &shim_path,
-        r#"#include <main/php.h>
+        r#"#include <stdarg.h>
+#include <main/php.h>
 
 int ripht_php_sapi_exit_status(void) {
     return EG(exit_status);
 }
+
+void ripht_sapi_error_shim(int type, const char *error_msg, ...) {
+    (void) type;
+    (void) error_msg;
+}
 "#,
     )
-    .expect("Failed to write exit-status shim");
+    .expect("Failed to write SAPI shim");
 
     cc::Build::new()
         .file(&shim_path)
@@ -369,7 +373,7 @@ int ripht_php_sapi_exit_status(void) {
         .include(include_dir.join("main"))
         .include(include_dir.join("Zend"))
         .include(include_dir.join("TSRM"))
-        .compile("ripht_exit_status_shim");
+        .compile("ripht_sapi_shim");
 }
 
 fn generate_bindgen_validation(php_prefix: &Path) {

@@ -172,6 +172,47 @@ fn fastcgi_finish_request_discards_late_output_and_headers() {
 }
 
 #[test]
+fn fastcgi_finish_request_finalizes_output_handlers() {
+    let php = RiphtSapi::instance();
+    let script_path =
+        php_script_path("fastcgi_finish_final_output_handler.php");
+    let marker_path = std::env::temp_dir().join(format!(
+        "ripht-fastcgi-finish-{}-{}.json",
+        std::process::id(),
+        "final-output-handler"
+    ));
+    let _ = std::fs::remove_file(&marker_path);
+
+    let exec = WebRequest::get()
+        .with_env(
+            "RIPHT_FASTCGI_FINAL_HANDLER_PATH",
+            marker_path
+                .to_string_lossy()
+                .into_owned(),
+        )
+        .build(&script_path)
+        .expect("failed to build WebRequest");
+
+    let result = php
+        .execute(exec)
+        .expect("fastcgi_finish_final_output_handler.php execution failed");
+
+    assert_eq!(result.body_string(), "before|final");
+
+    let marker: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(&marker_path).expect(
+            "fastcgi_finish_final_output_handler.php should write marker sidecar",
+        ),
+    )
+    .expect("marker sidecar should be valid JSON");
+
+    assert_eq!(marker["finished"], true);
+    assert_eq!(marker["marker"], "final-handler-complete");
+
+    let _ = std::fs::remove_file(marker_path);
+}
+
+#[test]
 fn post_request_works() {
     let php = RiphtSapi::instance();
     let script_path = php_script_path("post_form.php");

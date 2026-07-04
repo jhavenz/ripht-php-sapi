@@ -52,7 +52,7 @@ pub fn finish_current_request() -> bool {
                 return false;
             };
 
-            ffi::php_output_flush_all();
+            ffi::php_output_end_all();
 
             if ffi::sapi_globals.headers_sent == 0 {
                 ffi::sapi_send_headers();
@@ -135,13 +135,6 @@ pub unsafe extern "C" fn ripht_sapi_flush(_server_context: *mut c_void) {
 
         (*ctx_ptr).flush();
     }));
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn ripht_sapi_error(
-    _error_type: c_int,
-    _error_msg: *const c_char,
-) {
 }
 
 #[no_mangle]
