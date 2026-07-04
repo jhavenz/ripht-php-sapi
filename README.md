@@ -137,6 +137,13 @@ impl ExecutionHooks for StreamHooks {
 sapi.execute_with_hooks(ctx, StreamHooks).expect("execution failed");
 ```
 
+### Native PHP Functions
+
+`SapiConfig::native_functions(...)` appends host-provided native PHP functions
+after Ripht's built-in compatibility functions. Ripht currently registers
+`fastcgi_finish_request()` as a built-in, so custom functions are additional
+entries rather than a replacement for the built-in table.
+
 ## Development notes
 
 - The build script expects a PHP build root that contains `lib/libphp.a` (static embed SAPI) and headers. Set `RIPHT_PHP_SAPI_PREFIX` to point at your PHP build prefix if necessary.

@@ -2,10 +2,6 @@
 
 max_width = 80
 chain_width = 30
-binop_separator = "Front"
-blank_lines_lower_bound = 1
-brace_style = "SameLineWhere"
 use_field_init_shorthand = true
 use_small_heuristics = "Default"
-group_imports = "StdExternalCrate"
 single_line_let_else_max_width = 0

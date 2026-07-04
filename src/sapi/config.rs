@@ -124,6 +124,10 @@ impl SapiConfig {
         self
     }
 
+    /// Registers host-provided native PHP functions in addition to Ripht's built-ins.
+    ///
+    /// Ripht always registers its compatibility functions first, then appends these
+    /// entries before PHP's function-table terminator.
     #[must_use]
     pub fn native_functions(
         mut self,
@@ -479,14 +483,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        assert_eq!(
-            names,
-            vec![
-                "dory_rust_ping",
-                "fastcgi_finish_request",
-                "ripht_test_native"
-            ]
-        );
+        assert_eq!(names, vec!["fastcgi_finish_request", "ripht_test_native"]);
         assert!(resolved
             .native_functions
             .last()
