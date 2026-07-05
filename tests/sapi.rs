@@ -24,6 +24,8 @@ enum SinkEvent {
 struct RecordingSink {
     events: Arc<std::sync::Mutex<Vec<SinkEvent>>>,
     marker_path: Option<PathBuf>,
+    write_result: SinkResult,
+    finish_result: SinkResult,
     finished: bool,
 }
 
@@ -32,6 +34,34 @@ impl RecordingSink {
         Self {
             events,
             marker_path: None,
+            write_result: SinkResult::Continue,
+            finish_result: SinkResult::Continue,
+            finished: false,
+        }
+    }
+
+    fn with_write_result(
+        events: Arc<std::sync::Mutex<Vec<SinkEvent>>>,
+        write_result: SinkResult,
+    ) -> Self {
+        Self {
+            events,
+            marker_path: None,
+            write_result,
+            finish_result: SinkResult::Continue,
+            finished: false,
+        }
+    }
+
+    fn with_finish_result(
+        events: Arc<std::sync::Mutex<Vec<SinkEvent>>>,
+        finish_result: SinkResult,
+    ) -> Self {
+        Self {
+            events,
+            marker_path: None,
+            write_result: SinkResult::Continue,
+            finish_result,
             finished: false,
         }
     }
@@ -43,6 +73,8 @@ impl RecordingSink {
         Self {
             events,
             marker_path: Some(marker_path),
+            write_result: SinkResult::Continue,
+            finish_result: SinkResult::Continue,
             finished: false,
         }
     }
@@ -77,7 +109,7 @@ impl ResponseSink for RecordingSink {
                 String::from_utf8_lossy(bytes).into_owned(),
             ));
 
-        SinkResult::Continue
+        self.write_result
     }
 
     fn flush(&mut self) -> SinkResult {
@@ -102,7 +134,7 @@ impl ResponseSink for RecordingSink {
             .unwrap()
             .push(SinkEvent::Finish { marker_exists });
 
-        SinkResult::Continue
+        self.finish_result
     }
 
     fn abort(&mut self, reason: AbortReason) {
@@ -532,6 +564,79 @@ fn execute_with_sink_preserves_php_messages() {
 
     assert!(report.php_success);
     assert!(!report.messages.is_empty());
+}
+
+#[test]
+fn host_sink_closed_write_reports_client_closed_and_aborts_sink() {
+    let php = RiphtSapi::instance();
+    let script_path = php_script_path("sink_events.php");
+    let events = Arc::new(std::sync::Mutex::new(Vec::<SinkEvent>::new()));
+
+    let exec = WebRequest::get()
+        .build(&script_path)
+        .expect("failed to build WebRequest");
+
+    let report = php
+        .execute_with_sink(
+            exec,
+            RecordingSink::with_write_result(
+                Arc::clone(&events),
+                SinkResult::Closed,
+            ),
+        )
+        .expect("execute_with_sink() failed");
+
+    assert!(report.php_success);
+    assert!(report.aborted);
+    assert_eq!(report.abort_reason, Some(AbortReason::ClientClosed));
+
+    let events = events.lock().unwrap();
+    assert!(matches!(
+        events.as_slice(),
+        [
+            SinkEvent::Headers(200, _),
+            SinkEvent::Write(_),
+            SinkEvent::Abort(AbortReason::ClientClosed)
+        ]
+    ));
+    assert!(!events
+        .iter()
+        .any(|event| matches!(event, SinkEvent::Finish { .. })));
+}
+
+#[test]
+fn host_sink_abort_finish_reports_sink_failure_and_aborts_sink() {
+    let php = RiphtSapi::instance();
+    let script_path = php_script_path("sink_events.php");
+    let events = Arc::new(std::sync::Mutex::new(Vec::<SinkEvent>::new()));
+
+    let exec = WebRequest::get()
+        .build(&script_path)
+        .expect("failed to build WebRequest");
+
+    let report = php
+        .execute_with_sink(
+            exec,
+            RecordingSink::with_finish_result(
+                Arc::clone(&events),
+                SinkResult::Abort,
+            ),
+        )
+        .expect("execute_with_sink() failed");
+
+    assert!(report.php_success);
+    assert!(report.aborted);
+    assert_eq!(report.abort_reason, Some(AbortReason::SinkFailure));
+
+    let events = events.lock().unwrap();
+    assert!(matches!(events.first(), Some(SinkEvent::Headers(200, _))));
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, SinkEvent::Finish { .. })));
+    assert!(matches!(
+        events.last(),
+        Some(SinkEvent::Abort(AbortReason::SinkFailure))
+    ));
 }
 
 #[test]
