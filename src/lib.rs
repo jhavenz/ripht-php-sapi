@@ -43,17 +43,19 @@ pub use sapi::{
 };
 
 pub use execution::{
-    ExecutionContext, ExecutionHooks, ExecutionMessage, ExecutionResult,
-    NoOpHooks, OutputAction, ResponseHeader, StreamingCallback, SyslogLevel,
+    AbortReason, ExecutionContext, ExecutionHooks, ExecutionMessage,
+    ExecutionReport, ExecutionResult, NoOpHooks, OutputAction, ResponseHeader,
+    ResponseSink, SinkResult, StreamingCallback, SyslogLevel,
 };
 
 pub mod prelude {
     pub use crate::{
-        finish_current_request, AdapterError, CliRequest, CliRequestError,
-        ExecutionContext, ExecutionHooks, ExecutionMessage, ExecutionResult,
-        Executor, Method, NoOpHooks, OutputAction, PhpSapiAdapter,
-        ResponseHeader, RiphtSapi, SapiConfig, SapiError, StreamingCallback,
-        SyslogLevel, WebRequest, WebRequestError,
+        finish_current_request, AbortReason, AdapterError, CliRequest,
+        CliRequestError, ExecutionContext, ExecutionHooks, ExecutionMessage,
+        ExecutionReport, ExecutionResult, Executor, Method, NoOpHooks,
+        OutputAction, PhpSapiAdapter, ResponseHeader, ResponseSink, RiphtSapi,
+        SapiConfig, SapiError, SinkResult, StreamingCallback, SyslogLevel,
+        WebRequest, WebRequestError,
     };
 
     #[cfg(feature = "http")]

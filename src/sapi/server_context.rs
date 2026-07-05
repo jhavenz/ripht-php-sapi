@@ -3,12 +3,10 @@ use std::ffi::CString;
 use std::sync::OnceLock;
 
 use crate::execution::{
-    ExecutionContext, ExecutionMessage, ExecutionResult, ResponseHeader,
+    AbortReason, ExecutionContext, ExecutionMessage, ExecutionReport,
+    ExecutionResult, ResponseHeader, ResponseSink, SinkResult,
 };
-use crate::sapi::response::{
-    AbortReason, BufferedResponseSink, ResponseLifecycle, ResponseSink,
-    SinkResult,
-};
+use crate::sapi::response::{BufferedResponseSink, ResponseLifecycle};
 use crate::sapi::ServerVarsCString;
 
 const MIN_BUFFER_SIZE: usize = 4096;
@@ -58,6 +56,96 @@ fn buffer_policy() -> &'static BufferPolicy {
 type FlushCallback = Box<dyn FnMut()>;
 type OutputCallback = Box<dyn FnMut(&[u8])>;
 
+enum ResponseTarget {
+    Buffered(BufferedResponseSink),
+    Host(Box<dyn ResponseSink>),
+}
+
+impl ResponseTarget {
+    fn buffered(capacity: usize) -> Self {
+        Self::Buffered(BufferedResponseSink::with_capacity(capacity))
+    }
+
+    fn host(sink: Box<dyn ResponseSink>) -> Self {
+        Self::Host(sink)
+    }
+
+    fn capacity(&self) -> Option<usize> {
+        match self {
+            Self::Buffered(sink) => Some(sink.capacity()),
+            Self::Host(_) => None,
+        }
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            Self::Buffered(sink) => sink.len(),
+            Self::Host(_) => 0,
+        }
+    }
+
+    fn reserve(&mut self, additional: usize) {
+        if let Self::Buffered(sink) = self {
+            sink.reserve(additional);
+        }
+    }
+
+    fn take_output(&mut self) -> Vec<u8> {
+        match self {
+            Self::Buffered(sink) => sink.take_output(),
+            Self::Host(_) => Vec::new(),
+        }
+    }
+}
+
+impl ResponseSink for ResponseTarget {
+    fn send_headers(
+        &mut self,
+        status: u16,
+        headers: &[ResponseHeader],
+    ) -> SinkResult {
+        match self {
+            Self::Buffered(sink) => sink.send_headers(status, headers),
+            Self::Host(sink) => sink.send_headers(status, headers),
+        }
+    }
+
+    fn write(&mut self, bytes: &[u8]) -> SinkResult {
+        match self {
+            Self::Buffered(sink) => sink.write(bytes),
+            Self::Host(sink) => sink.write(bytes),
+        }
+    }
+
+    fn flush(&mut self) -> SinkResult {
+        match self {
+            Self::Buffered(sink) => sink.flush(),
+            Self::Host(sink) => sink.flush(),
+        }
+    }
+
+    fn finish(&mut self) -> SinkResult {
+        match self {
+            Self::Buffered(sink) => sink.finish(),
+            Self::Host(sink) => sink.finish(),
+        }
+    }
+
+    fn abort(&mut self, reason: AbortReason) {
+        match self {
+            Self::Buffered(sink) => sink.abort(reason),
+            Self::Host(sink) => sink.abort(reason),
+        }
+    }
+
+    fn is_finished(&self) -> bool {
+        match self {
+            Self::Buffered(sink) => sink.is_finished(),
+            Self::Host(sink) => sink.is_finished(),
+        }
+    }
+}
+
 /// Per-request state for the SAPI.
 ///
 /// # Interior Mutability
@@ -68,7 +156,7 @@ type OutputCallback = Box<dyn FnMut(&[u8])>;
 pub struct ServerContext {
     status_code: Cell<u16>,
     response: ResponseLifecycle,
-    sink: BufferedResponseSink,
+    sink: ResponseTarget,
     pub post_data: Vec<u8>,
     post_position: Cell<usize>,
     pub messages: Vec<ExecutionMessage>,
@@ -89,14 +177,22 @@ impl Default for ServerContext {
 
 impl ServerContext {
     pub fn new() -> Self {
-        let policy = buffer_policy();
+        Self::with_response_target(ResponseTarget::buffered(
+            buffer_policy().initial_cap,
+        ))
+    }
 
+    pub(crate) fn with_response_sink(sink: Box<dyn ResponseSink>) -> Self {
+        Self::with_response_target(ResponseTarget::host(sink))
+    }
+
+    fn with_response_target(sink: ResponseTarget) -> Self {
         Self {
             post_data: Vec::new(),
             post_position: Cell::new(0),
             status_code: Cell::new(200),
             response: ResponseLifecycle::default(),
-            sink: BufferedResponseSink::with_capacity(policy.initial_cap),
+            sink,
             messages: Vec::with_capacity(8),
             vars: None,
             env_vars: Vec::new(),
@@ -179,7 +275,10 @@ impl ServerContext {
             return data.len();
         }
 
-        let actual_buffer_length = self.sink.capacity();
+        let Some(actual_buffer_length) = self.sink.capacity() else {
+            return self.write_to_sink(data);
+        };
+
         let required_buffer_length = self.sink.len() + data.len();
 
         if required_buffer_length > actual_buffer_length {
@@ -205,6 +304,10 @@ impl ServerContext {
                 .reserve(new_cap - self.sink.len());
         }
 
+        self.write_to_sink(data)
+    }
+
+    fn write_to_sink(&mut self, data: &[u8]) -> usize {
         match self.sink.write(data) {
             SinkResult::Continue => {}
             SinkResult::Closed => {
@@ -249,9 +352,9 @@ impl ServerContext {
     }
 
     pub fn finalize_headers(&mut self) -> bool {
-        if !self
+        if self
             .response
-            .finalize_headers()
+            .headers_finalized()
         {
             return false;
         }
@@ -261,7 +364,9 @@ impl ServerContext {
             .send_headers(self.status_code(), &self.response_headers);
 
         match result {
-            SinkResult::Continue => true,
+            SinkResult::Continue => self
+                .response
+                .finalize_headers(),
             SinkResult::Closed => {
                 self.abort_response(AbortReason::ClientClosed);
                 false
@@ -315,6 +420,14 @@ impl ServerContext {
     }
 
     pub fn finalize_response(&mut self) -> bool {
+        self.finish_response(false)
+    }
+
+    pub fn finalize_response_early(&mut self) -> bool {
+        self.finish_response(true)
+    }
+
+    fn finish_response(&mut self, finalized_early: bool) -> bool {
         if !self.response.can_finish() {
             return false;
         }
@@ -331,7 +444,13 @@ impl ServerContext {
             }
         }
 
-        if !self.response.finish() {
+        let finished = if finalized_early {
+            self.response.finish_early()
+        } else {
+            self.response.finish()
+        };
+
+        if !finished {
             return false;
         }
 
@@ -357,6 +476,19 @@ impl ServerContext {
         true
     }
 
+    pub(crate) fn finalized_early(&self) -> bool {
+        self.response
+            .finalized_early()
+    }
+
+    pub(crate) fn aborted(&self) -> bool {
+        self.response.aborted()
+    }
+
+    pub(crate) fn abort_reason(&self) -> Option<AbortReason> {
+        self.response.abort_reason()
+    }
+
     pub fn get_env(&self, key: &[u8]) -> Option<*const std::ffi::c_char> {
         self.env_vars
             .iter()
@@ -373,21 +505,42 @@ impl ServerContext {
             self.messages,
         )
     }
-}
 
-impl From<ExecutionContext> for Box<ServerContext> {
-    fn from(ctx: ExecutionContext) -> Self {
-        let mut server_ctx = Box::new(ServerContext::new());
+    pub fn into_report(
+        self,
+        exit_status: i32,
+        php_success: bool,
+    ) -> ExecutionReport {
+        ExecutionReport::new(
+            self.status_code.get(),
+            exit_status,
+            php_success,
+            self.finalized_early(),
+            self.aborted(),
+            self.abort_reason(),
+            self.messages,
+        )
+    }
 
-        server_ctx.post_data = ctx.input;
-        server_ctx.log_to_stderr = ctx.log_to_stderr;
+    pub(crate) fn from_context_with_sink(
+        ctx: ExecutionContext,
+        sink: Box<dyn ResponseSink>,
+    ) -> Box<ServerContext> {
+        let mut server_ctx = Box::new(ServerContext::with_response_sink(sink));
+        server_ctx.apply_context(ctx);
+        server_ctx
+    }
 
-        server_ctx.vars = Some(
+    fn apply_context(&mut self, ctx: ExecutionContext) {
+        self.post_data = ctx.input;
+        self.log_to_stderr = ctx.log_to_stderr;
+
+        self.vars = Some(
             ctx.server_vars
                 .into_cstring_pairs(),
         );
 
-        server_ctx.env_vars = ctx
+        self.env_vars = ctx
             .env_vars
             .into_iter()
             .filter_map(|(k, v)| {
@@ -395,14 +548,20 @@ impl From<ExecutionContext> for Box<ServerContext> {
             })
             .collect();
 
-        server_ctx.ini_overrides = ctx
+        self.ini_overrides = ctx
             .ini_overrides
             .into_iter()
             .filter_map(|(k, v)| {
                 Some((CString::new(k).ok()?, CString::new(v).ok()?))
             })
             .collect();
+    }
+}
 
+impl From<ExecutionContext> for Box<ServerContext> {
+    fn from(ctx: ExecutionContext) -> Self {
+        let mut server_ctx = Box::new(ServerContext::new());
+        server_ctx.apply_context(ctx);
         server_ctx
     }
 }

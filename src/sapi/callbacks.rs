@@ -58,7 +58,7 @@ pub fn finish_current_request() -> bool {
                 ffi::sapi_send_headers();
             }
 
-            (*ctx_ptr).finalize_response()
+            (*ctx_ptr).finalize_response_early()
         }));
 
     result.unwrap_or(false)

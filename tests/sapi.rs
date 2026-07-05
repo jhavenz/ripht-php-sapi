@@ -2,13 +2,119 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use ripht_php_sapi::{
-    ExecutionContext, ExecutionHooks, OutputAction, RiphtSapi, WebRequest,
+    AbortReason, ExecutionContext, ExecutionHooks, OutputAction,
+    ResponseHeader, ResponseSink, RiphtSapi, SinkResult, WebRequest,
 };
 
 fn php_script_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/php_scripts")
         .join(name)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SinkEvent {
+    Headers(u16, Vec<(String, String)>),
+    Write(String),
+    Flush,
+    Finish { marker_exists: Option<bool> },
+    Abort(AbortReason),
+}
+
+struct RecordingSink {
+    events: Arc<std::sync::Mutex<Vec<SinkEvent>>>,
+    marker_path: Option<PathBuf>,
+    finished: bool,
+}
+
+impl RecordingSink {
+    fn new(events: Arc<std::sync::Mutex<Vec<SinkEvent>>>) -> Self {
+        Self {
+            events,
+            marker_path: None,
+            finished: false,
+        }
+    }
+
+    fn with_marker_probe(
+        events: Arc<std::sync::Mutex<Vec<SinkEvent>>>,
+        marker_path: PathBuf,
+    ) -> Self {
+        Self {
+            events,
+            marker_path: Some(marker_path),
+            finished: false,
+        }
+    }
+}
+
+impl ResponseSink for RecordingSink {
+    fn send_headers(
+        &mut self,
+        status: u16,
+        headers: &[ResponseHeader],
+    ) -> SinkResult {
+        let headers = headers
+            .iter()
+            .map(|header| {
+                (header.name().to_string(), header.value().to_string())
+            })
+            .collect();
+
+        self.events
+            .lock()
+            .unwrap()
+            .push(SinkEvent::Headers(status, headers));
+
+        SinkResult::Continue
+    }
+
+    fn write(&mut self, bytes: &[u8]) -> SinkResult {
+        self.events
+            .lock()
+            .unwrap()
+            .push(SinkEvent::Write(
+                String::from_utf8_lossy(bytes).into_owned(),
+            ));
+
+        SinkResult::Continue
+    }
+
+    fn flush(&mut self) -> SinkResult {
+        self.events
+            .lock()
+            .unwrap()
+            .push(SinkEvent::Flush);
+
+        SinkResult::Continue
+    }
+
+    fn finish(&mut self) -> SinkResult {
+        self.finished = true;
+
+        let marker_exists = self
+            .marker_path
+            .as_ref()
+            .map(|path| path.exists());
+
+        self.events
+            .lock()
+            .unwrap()
+            .push(SinkEvent::Finish { marker_exists });
+
+        SinkResult::Continue
+    }
+
+    fn abort(&mut self, reason: AbortReason) {
+        self.events
+            .lock()
+            .unwrap()
+            .push(SinkEvent::Abort(reason));
+    }
+
+    fn is_finished(&self) -> bool {
+        self.finished
+    }
 }
 
 #[test]
@@ -210,6 +316,241 @@ fn fastcgi_finish_request_finalizes_output_handlers() {
     assert_eq!(marker["marker"], "final-handler-complete");
 
     let _ = std::fs::remove_file(marker_path);
+}
+
+#[test]
+fn host_sink_observes_headers_body_flush_finish_in_order() {
+    let php = RiphtSapi::instance();
+    let script_path = php_script_path("sink_events.php");
+    let events = Arc::new(std::sync::Mutex::new(Vec::<SinkEvent>::new()));
+
+    let exec = WebRequest::get()
+        .build(&script_path)
+        .expect("failed to build WebRequest");
+
+    let report = php
+        .execute_with_sink(exec, RecordingSink::new(Arc::clone(&events)))
+        .expect("execute_with_sink() failed");
+
+    assert_eq!(report.status_code, 200);
+    assert!(report.php_success);
+    assert!(!report.finalized_early);
+    assert!(!report.aborted);
+    assert_eq!(report.abort_reason, None);
+
+    let events = events.lock().unwrap();
+
+    assert!(matches!(events.first(), Some(SinkEvent::Headers(200, _))));
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, SinkEvent::Flush)));
+    assert!(matches!(events.last(), Some(SinkEvent::Finish { .. })));
+
+    let body = events
+        .iter()
+        .filter_map(|event| match event {
+            SinkEvent::Write(bytes) => Some(bytes.as_str()),
+            _ => None,
+        })
+        .collect::<String>();
+
+    assert_eq!(body, "alphaomega");
+}
+
+#[test]
+fn host_sink_observes_finish_before_post_finish_marker() {
+    let php = RiphtSapi::instance();
+    let script_path = php_script_path("fastcgi_finish_marker.php");
+    let marker_path = std::env::temp_dir().join(format!(
+        "ripht-fastcgi-finish-{}-{}.json",
+        std::process::id(),
+        "sink-finish-before-marker"
+    ));
+    let _ = std::fs::remove_file(&marker_path);
+
+    let events = Arc::new(std::sync::Mutex::new(Vec::<SinkEvent>::new()));
+
+    let exec = WebRequest::get()
+        .with_env(
+            "RIPHT_FASTCGI_MARKER_PATH",
+            marker_path
+                .to_string_lossy()
+                .into_owned(),
+        )
+        .build(&script_path)
+        .expect("failed to build WebRequest");
+
+    let report = php
+        .execute_with_sink(
+            exec,
+            RecordingSink::with_marker_probe(
+                Arc::clone(&events),
+                marker_path.clone(),
+            ),
+        )
+        .expect("execute_with_sink() failed");
+
+    assert!(report.finalized_early);
+
+    let events = events.lock().unwrap();
+    assert!(events.iter().any(|event| {
+        matches!(
+            event,
+            SinkEvent::Finish {
+                marker_exists: Some(false)
+            }
+        )
+    }));
+
+    let marker: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(&marker_path)
+            .expect("fastcgi_finish_marker.php should write marker sidecar"),
+    )
+    .expect("marker sidecar should be valid JSON");
+
+    assert_eq!(marker["marker"], "after-finish");
+
+    let _ = std::fs::remove_file(marker_path);
+}
+
+#[test]
+fn execute_with_sink_reports_early_finish_and_final_output() {
+    let php = RiphtSapi::instance();
+    let script_path =
+        php_script_path("fastcgi_finish_final_output_handler.php");
+    let marker_path = std::env::temp_dir().join(format!(
+        "ripht-fastcgi-finish-{}-{}.json",
+        std::process::id(),
+        "sink-final-output-handler"
+    ));
+    let _ = std::fs::remove_file(&marker_path);
+
+    let events = Arc::new(std::sync::Mutex::new(Vec::<SinkEvent>::new()));
+
+    let exec = WebRequest::get()
+        .with_env(
+            "RIPHT_FASTCGI_FINAL_HANDLER_PATH",
+            marker_path
+                .to_string_lossy()
+                .into_owned(),
+        )
+        .build(&script_path)
+        .expect("failed to build WebRequest");
+
+    let report = php
+        .execute_with_sink(exec, RecordingSink::new(Arc::clone(&events)))
+        .expect("execute_with_sink() failed");
+
+    assert!(report.php_success);
+    assert!(report.finalized_early);
+    assert!(!report.aborted);
+
+    let events = events.lock().unwrap();
+    let body = events
+        .iter()
+        .filter_map(|event| match event {
+            SinkEvent::Write(bytes) => Some(bytes.as_str()),
+            _ => None,
+        })
+        .collect::<String>();
+
+    assert_eq!(body, "before|final");
+    assert!(matches!(events.last(), Some(SinkEvent::Finish { .. })));
+
+    let _ = std::fs::remove_file(marker_path);
+}
+
+#[test]
+fn host_sink_discards_late_output_and_headers_after_finish() {
+    let php = RiphtSapi::instance();
+    let script_path = php_script_path("fastcgi_finish_late_output.php");
+    let marker_path = std::env::temp_dir().join(format!(
+        "ripht-fastcgi-finish-{}-{}.json",
+        std::process::id(),
+        "sink-late-output"
+    ));
+    let _ = std::fs::remove_file(&marker_path);
+
+    let events = Arc::new(std::sync::Mutex::new(Vec::<SinkEvent>::new()));
+
+    let exec = WebRequest::get()
+        .with_env(
+            "RIPHT_FASTCGI_LATE_OUTPUT_PATH",
+            marker_path
+                .to_string_lossy()
+                .into_owned(),
+        )
+        .build(&script_path)
+        .expect("failed to build WebRequest");
+
+    let report = php
+        .execute_with_sink(exec, RecordingSink::new(Arc::clone(&events)))
+        .expect("execute_with_sink() failed");
+
+    assert!(report.finalized_early);
+
+    let events = events.lock().unwrap();
+    let body = events
+        .iter()
+        .filter_map(|event| match event {
+            SinkEvent::Write(bytes) => Some(bytes.as_str()),
+            _ => None,
+        })
+        .collect::<String>();
+
+    assert!(body.contains("\"before\":true"));
+    assert!(!body.contains("after"));
+
+    let header_names = events
+        .iter()
+        .flat_map(|event| match event {
+            SinkEvent::Headers(_, headers) => headers.as_slice(),
+            _ => &[],
+        })
+        .map(|(name, _)| name.as_str())
+        .collect::<Vec<_>>();
+
+    assert!(header_names.contains(&"X-Ripht-Before-Finish"));
+    assert!(!header_names.contains(&"X-Ripht-After-Finish"));
+
+    let _ = std::fs::remove_file(marker_path);
+}
+
+#[test]
+fn execute_with_sink_preserves_php_messages() {
+    let php = RiphtSapi::instance();
+    let script_path = php_script_path("errors.php");
+    let events = Arc::new(std::sync::Mutex::new(Vec::<SinkEvent>::new()));
+
+    let exec = WebRequest::get()
+        .build(&script_path)
+        .expect("failed to build WebRequest");
+
+    let report = php
+        .execute_with_sink(exec, RecordingSink::new(Arc::clone(&events)))
+        .expect("execute_with_sink() failed");
+
+    assert!(report.php_success);
+    assert!(!report.messages.is_empty());
+}
+
+#[test]
+fn execute_remains_buffered_compatible_after_sink_api() {
+    let php = RiphtSapi::instance();
+    let script_path = php_script_path("hello.php");
+
+    let exec = WebRequest::get()
+        .build(&script_path)
+        .expect("failed to build WebRequest");
+
+    let result = php
+        .execute(exec)
+        .expect("hello.php execution failed");
+
+    assert_eq!(result.status_code(), 200);
+    assert!(result
+        .body_string()
+        .contains("Hello"));
 }
 
 #[test]

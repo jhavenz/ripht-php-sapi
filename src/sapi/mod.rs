@@ -36,7 +36,10 @@ pub use config::SapiConfig;
 pub use executor::{ExecutionError, Executor};
 pub(crate) use server_vars::{ServerVars, ServerVarsCString};
 
-use crate::execution::{ExecutionContext, ExecutionHooks, ExecutionResult};
+use crate::execution::{
+    ExecutionContext, ExecutionHooks, ExecutionReport, ExecutionResult,
+    ResponseSink,
+};
 use config::ResolvedConfig;
 
 static PHP_INIT_RESULT: OnceLock<Result<(), SapiError>> = OnceLock::new();
@@ -355,6 +358,19 @@ impl RiphtSapi {
         self.executor()
             .map_err(|_| ExecutionError::NotInitialized)?
             .execute_with_hooks(ctx, hooks)
+    }
+
+    pub fn execute_with_sink<S>(
+        &self,
+        ctx: ExecutionContext,
+        sink: S,
+    ) -> Result<ExecutionReport, ExecutionError>
+    where
+        S: ResponseSink + 'static,
+    {
+        self.executor()
+            .map_err(|_| ExecutionError::NotInitialized)?
+            .execute_with_sink(ctx, sink)
     }
 
     pub fn is_initialized(&self) -> bool {

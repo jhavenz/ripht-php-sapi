@@ -14,8 +14,8 @@ use super::ffi;
 use super::server_context::ServerContext;
 use super::SapiError;
 use crate::execution::{
-    ExecutionContext, ExecutionHooks, ExecutionResult, NoOpHooks, OutputAction,
-    ResponseHeader,
+    ExecutionContext, ExecutionHooks, ExecutionReport, ExecutionResult,
+    NoOpHooks, OutputAction, ResponseHeader, ResponseSink,
 };
 
 /// Errors that can occur during PHP script execution.
@@ -117,6 +117,82 @@ impl<'sapi> Executor<'sapi> {
         }
     }
 
+    pub fn execute_with_sink<S>(
+        &self,
+        ctx: ExecutionContext,
+        sink: S,
+    ) -> Result<ExecutionReport, ExecutionError>
+    where
+        S: ResponseSink + 'static,
+    {
+        #[cfg(feature = "tracing")]
+        debug!(
+            script_path = %ctx.script_path.display(),
+            "Executing PHP with response sink"
+        );
+
+        if !self.sapi.is_initialized() {
+            #[cfg(feature = "tracing")]
+            error!("Execute before init");
+            return Err(ExecutionError::NotInitialized);
+        }
+
+        if !ctx.script_path.exists() {
+            return Err(ExecutionError::ScriptNotFound(
+                ctx.script_path.clone(),
+            ));
+        }
+
+        let script_cstr = ctx.path_as_cstring()?;
+        let server_ctx =
+            ServerContext::from_context_with_sink(ctx, Box::new(sink));
+
+        // SAFETY: Same ownership transfer pattern as execute_with_hooks.
+        unsafe {
+            let ctx_ptr = Box::into_raw(server_ctx);
+            ffi::sapi_globals.server_context = ctx_ptr as *mut std::ffi::c_void;
+            Self::setup_globals(&*ctx_ptr);
+
+            #[cfg(feature = "tracing")]
+            trace!("Starting PHP request");
+
+            let startup_result = ffi::php_request_startup();
+
+            if startup_result == ffi::FAILURE {
+                #[cfg(feature = "tracing")]
+                error!("Request startup failed");
+                ffi::php_request_shutdown(std::ptr::null_mut());
+                ffi::sapi_globals.server_context = std::ptr::null_mut();
+                let _ = Box::from_raw(ctx_ptr);
+                Self::cleanup_globals();
+                return Err(ExecutionError::StartupFailed);
+            }
+
+            Self::apply_ini_overrides(&*ctx_ptr);
+
+            #[cfg(feature = "tracing")]
+            trace!("Executing script");
+
+            let exec_result = Self::run_script(&script_cstr);
+            let exit_status = ffi::ripht_php_sapi_exit_status();
+            let success = exec_result != ffi::FAILURE;
+
+            #[cfg(feature = "tracing")]
+            trace!("Shutting down request");
+
+            ffi::sapi_globals.post_read = 1;
+            ffi::php_request_shutdown(std::ptr::null_mut());
+            ffi::sapi_globals.server_context = std::ptr::null_mut();
+
+            let mut server_ctx = Box::from_raw(ctx_ptr);
+            Self::cleanup_globals();
+
+            server_ctx.finalize_response();
+
+            Ok((*server_ctx).into_report(exit_status, success))
+        }
+    }
+
     pub fn execute_with_hooks<H: ExecutionHooks + 'static>(
         &self,
         ctx: ExecutionContext,
@@ -196,6 +272,7 @@ impl<'sapi> Executor<'sapi> {
 
             // SAFETY: Defensive cleanup of request-related pointers.
             Self::cleanup_globals();
+            server_ctx.finalize_response();
 
             let headers: Vec<ResponseHeader> =
                 if TypeId::of::<H>() == TypeId::of::<NoOpHooks>() {

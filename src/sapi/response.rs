@@ -1,37 +1,11 @@
-use crate::execution::ResponseHeader;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SinkResult {
-    Continue,
-    Closed,
-    Abort,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AbortReason {
-    ClientClosed,
-    SinkFailure,
-}
-
-pub(crate) trait ResponseSink {
-    fn send_headers(
-        &mut self,
-        status: u16,
-        headers: &[ResponseHeader],
-    ) -> SinkResult;
-
-    fn write(&mut self, bytes: &[u8]) -> SinkResult;
-    fn flush(&mut self) -> SinkResult;
-    fn finish(&mut self) -> SinkResult;
-    fn abort(&mut self, reason: AbortReason);
-    fn is_finished(&self) -> bool;
-}
+use crate::execution::{AbortReason, ResponseHeader, ResponseSink, SinkResult};
 
 #[derive(Debug, Default)]
 pub(crate) struct ResponseLifecycle {
     headers_finalized: bool,
     response_finished: bool,
     response_aborted: bool,
+    finalized_early: bool,
     abort_reason: Option<AbortReason>,
 }
 
@@ -58,11 +32,20 @@ impl ResponseLifecycle {
     }
 
     pub(crate) fn finish(&mut self) -> bool {
+        self.finish_with_origin(false)
+    }
+
+    pub(crate) fn finish_early(&mut self) -> bool {
+        self.finish_with_origin(true)
+    }
+
+    fn finish_with_origin(&mut self, finalized_early: bool) -> bool {
         if !self.can_finish() {
             return false;
         }
 
         self.response_finished = true;
+        self.finalized_early = finalized_early;
         true
     }
 
@@ -80,14 +63,21 @@ impl ResponseLifecycle {
         true
     }
 
-    #[cfg(test)]
-    pub(crate) fn is_finished(&self) -> bool {
-        self.response_finished
+    pub(crate) fn finalized_early(&self) -> bool {
+        self.finalized_early
+    }
+
+    pub(crate) fn aborted(&self) -> bool {
+        self.response_aborted
+    }
+
+    pub(crate) fn abort_reason(&self) -> Option<AbortReason> {
+        self.abort_reason
     }
 
     #[cfg(test)]
-    pub(crate) fn abort_reason(&self) -> Option<AbortReason> {
-        self.abort_reason
+    pub(crate) fn is_finished(&self) -> bool {
+        self.response_finished
     }
 }
 
