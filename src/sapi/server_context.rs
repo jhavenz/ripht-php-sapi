@@ -54,7 +54,6 @@ fn buffer_policy() -> &'static BufferPolicy {
 }
 
 type FlushCallback = Box<dyn FnMut()>;
-type OutputCallback = Box<dyn FnMut(&[u8])>;
 
 enum ResponseTarget {
     Buffered(BufferedResponseSink),
@@ -164,7 +163,6 @@ pub struct ServerContext {
     pub env_vars: Vec<(CString, CString)>,
     pub ini_overrides: Vec<(CString, CString)>,
     pub response_headers: Vec<ResponseHeader>,
-    pub output_callback: Option<OutputCallback>,
     pub flush_callback: Option<FlushCallback>,
     pub log_to_stderr: bool,
 }
@@ -198,7 +196,6 @@ impl ServerContext {
             env_vars: Vec::new(),
             ini_overrides: Vec::new(),
             response_headers: Vec::with_capacity(16),
-            output_callback: None,
             flush_callback: None,
             log_to_stderr: false,
         }
@@ -266,12 +263,6 @@ impl ServerContext {
 
     pub fn write_output(&mut self, data: &[u8]) -> usize {
         if !self.response.can_write() {
-            return data.len();
-        }
-
-        if let Some(ref mut callback) = self.output_callback {
-            callback(data);
-
             return data.len();
         }
 
@@ -386,13 +377,6 @@ impl ServerContext {
         self.messages.push(message);
     }
 
-    pub fn set_output_callback<F: FnMut(&[u8]) + 'static>(
-        &mut self,
-        callback: F,
-    ) {
-        self.output_callback = Some(Box::new(callback));
-    }
-
     pub fn set_flush_callback<F: FnMut() + 'static>(&mut self, callback: F) {
         self.flush_callback = Some(Box::new(callback));
     }
@@ -455,10 +439,6 @@ impl ServerContext {
         }
 
         debug_assert!(self.sink.is_finished());
-
-        if let Some(ref mut callback) = self.flush_callback {
-            callback();
-        }
 
         true
     }

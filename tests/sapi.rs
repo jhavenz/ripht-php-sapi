@@ -12,6 +12,41 @@ fn php_script_path(name: &str) -> PathBuf {
         .join(name)
 }
 
+fn sidecar_path(name: &str) -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "ripht-{}-{}.json",
+        std::process::id(),
+        name
+    ))
+}
+
+fn execute_streaming_collect(
+    php: &RiphtSapi,
+    exec: ExecutionContext,
+) -> (ripht_php_sapi::ExecutionResult, Vec<u8>) {
+    let chunks = Arc::new(std::sync::Mutex::new(Vec::<Vec<u8>>::new()));
+    let chunks_clone = Arc::clone(&chunks);
+
+    let result = php
+        .execute_streaming(exec, move |chunk| {
+            chunks_clone
+                .lock()
+                .unwrap()
+                .push(chunk.to_vec());
+        })
+        .expect("streaming request execution failed");
+
+    let body = chunks
+        .lock()
+        .unwrap()
+        .iter()
+        .flatten()
+        .copied()
+        .collect();
+
+    (result, body)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum SinkEvent {
     Headers(u16, Vec<(String, String)>),
@@ -146,6 +181,34 @@ impl ResponseSink for RecordingSink {
 
     fn is_finished(&self) -> bool {
         self.finished
+    }
+}
+
+struct OutputCaptureHooks {
+    outputs: Arc<std::sync::Mutex<Vec<Vec<u8>>>>,
+    action: OutputAction,
+}
+
+impl ExecutionHooks for OutputCaptureHooks {
+    fn on_output(&mut self, data: &[u8]) -> OutputAction {
+        self.outputs
+            .lock()
+            .unwrap()
+            .push(data.to_vec());
+
+        self.action
+    }
+}
+
+struct FlushCaptureHooks {
+    flushes: Arc<std::sync::Mutex<usize>>,
+}
+
+impl ExecutionHooks for FlushCaptureHooks {
+    fn on_flush(&mut self) {
+        let mut flushes = self.flushes.lock().unwrap();
+
+        *flushes += 1;
     }
 }
 
@@ -637,6 +700,138 @@ fn host_sink_abort_finish_reports_sink_failure_and_aborts_sink() {
         events.last(),
         Some(SinkEvent::Abort(AbortReason::SinkFailure))
     ));
+}
+
+#[test]
+fn execute_streaming_fastcgi_finish_delivers_pre_finish_output() {
+    let php = RiphtSapi::instance();
+    let script_path = php_script_path("fastcgi_finish.php");
+    let marker_path = sidecar_path("streaming-fastcgi-finish");
+    let _ = std::fs::remove_file(&marker_path);
+
+    let exec = WebRequest::get()
+        .with_env(
+            "RIPHT_FASTCGI_FINISH_RESULT",
+            marker_path
+                .to_string_lossy()
+                .into_owned(),
+        )
+        .build(&script_path)
+        .expect("failed to build WebRequest");
+
+    let (result, body) = execute_streaming_collect(&php, exec);
+    let body = String::from_utf8_lossy(&body);
+
+    assert_eq!(result.status_code(), 200);
+    assert!(result.body().is_empty());
+    assert!(body.contains("\"available\":true"));
+    assert!(body.contains("\"pre\":true"));
+    assert!(!body.contains("after"));
+    assert_eq!(result.header_val("X-Ripht-Finalized"), Some("yes"));
+
+    let marker: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(&marker_path)
+            .expect("fastcgi_finish.php should write result sidecar"),
+    )
+    .expect("finish result sidecar should be valid JSON");
+
+    assert_eq!(marker["first"], true);
+    assert_eq!(marker["second"], false);
+
+    let _ = std::fs::remove_file(marker_path);
+}
+
+#[test]
+fn execute_streaming_fastcgi_finish_discards_late_output_and_headers() {
+    let php = RiphtSapi::instance();
+    let script_path = php_script_path("fastcgi_finish_late_output.php");
+    let marker_path = sidecar_path("streaming-late-output");
+    let _ = std::fs::remove_file(&marker_path);
+
+    let exec = WebRequest::get()
+        .with_env(
+            "RIPHT_FASTCGI_LATE_OUTPUT_PATH",
+            marker_path
+                .to_string_lossy()
+                .into_owned(),
+        )
+        .build(&script_path)
+        .expect("failed to build WebRequest");
+
+    let (result, body) = execute_streaming_collect(&php, exec);
+    let body = String::from_utf8_lossy(&body);
+
+    assert!(result.body().is_empty());
+    assert!(body.contains("\"before\":true"));
+    assert!(!body.contains("after"));
+    assert!(result
+        .header_val("X-Ripht-Before-Finish")
+        .is_some());
+    assert!(result
+        .header_val("X-Ripht-After-Finish")
+        .is_none());
+
+    let marker: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(&marker_path)
+            .expect("late-output fixture should write marker sidecar"),
+    )
+    .expect("late-output sidecar should be valid JSON");
+
+    assert_eq!(marker["finished"], true);
+    assert_eq!(marker["marker"], "late-output-complete");
+
+    let _ = std::fs::remove_file(marker_path);
+}
+
+#[test]
+fn execute_streaming_fastcgi_finish_finalizes_output_handlers() {
+    let php = RiphtSapi::instance();
+    let script_path =
+        php_script_path("fastcgi_finish_final_output_handler.php");
+    let marker_path = sidecar_path("streaming-final-output-handler");
+    let _ = std::fs::remove_file(&marker_path);
+
+    let exec = WebRequest::get()
+        .with_env(
+            "RIPHT_FASTCGI_FINAL_HANDLER_PATH",
+            marker_path
+                .to_string_lossy()
+                .into_owned(),
+        )
+        .build(&script_path)
+        .expect("failed to build WebRequest");
+
+    let (result, body) = execute_streaming_collect(&php, exec);
+
+    assert!(result.body().is_empty());
+    assert_eq!(String::from_utf8_lossy(&body), "before|final");
+
+    let marker: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(&marker_path)
+            .expect("final-handler fixture should write marker sidecar"),
+    )
+    .expect("final-handler sidecar should be valid JSON");
+
+    assert_eq!(marker["finished"], true);
+    assert_eq!(marker["marker"], "final-handler-complete");
+
+    let _ = std::fs::remove_file(marker_path);
+}
+
+#[test]
+fn execute_streaming_sink_events_flush_does_not_finish() {
+    let php = RiphtSapi::instance();
+    let script_path = php_script_path("sink_events.php");
+
+    let exec = WebRequest::get()
+        .build(&script_path)
+        .expect("failed to build WebRequest");
+
+    let (result, body) = execute_streaming_collect(&php, exec);
+
+    assert_eq!(result.status_code(), 200);
+    assert!(result.body().is_empty());
+    assert_eq!(String::from_utf8_lossy(&body), "alphaomega");
 }
 
 #[test]
@@ -1632,6 +1827,158 @@ fn test_webrequest_shaping_via_superglobals() {
     // Default Content-Type / Content-Length behavior when body is present
     assert_eq!(json["SERVER"]["CONTENT_TYPE"], "application/octet-stream");
     assert_eq!(json["SERVER"]["CONTENT_LENGTH"], body.len().to_string());
+}
+
+#[test]
+fn execute_with_hooks_calls_output_once_with_final_body() {
+    let php = RiphtSapi::instance();
+    let script_path = php_script_path("hello.php");
+    let outputs = Arc::new(std::sync::Mutex::new(Vec::<Vec<u8>>::new()));
+
+    let exec = WebRequest::get()
+        .build(&script_path)
+        .expect("failed to build WebRequest");
+
+    let result = php
+        .execute_with_hooks(
+            exec,
+            OutputCaptureHooks {
+                outputs: Arc::clone(&outputs),
+                action: OutputAction::Continue,
+            },
+        )
+        .expect("execute_with_hooks() failed");
+
+    let outputs = outputs.lock().unwrap();
+    assert_eq!(outputs.len(), 1);
+    assert_eq!(outputs[0], result.body());
+    assert!(result
+        .body_string()
+        .contains("Hello"));
+}
+
+#[test]
+fn execute_with_hooks_observes_php_flush_once() {
+    let php = RiphtSapi::instance();
+    let script_path = php_script_path("sink_events.php");
+    let flushes = Arc::new(std::sync::Mutex::new(0));
+
+    let exec = WebRequest::get()
+        .build(&script_path)
+        .expect("failed to build WebRequest");
+
+    let result = php
+        .execute_with_hooks(
+            exec,
+            FlushCaptureHooks {
+                flushes: Arc::clone(&flushes),
+            },
+        )
+        .expect("execute_with_hooks() failed");
+
+    assert_eq!(result.body(), b"alphaomega");
+    assert_eq!(*flushes.lock().unwrap(), 1);
+}
+
+#[test]
+fn execute_with_hooks_fastcgi_finish_discards_late_output_and_headers() {
+    let php = RiphtSapi::instance();
+    let script_path = php_script_path("fastcgi_finish_late_output.php");
+    let marker_path = sidecar_path("hooks-late-output");
+    let _ = std::fs::remove_file(&marker_path);
+    let outputs = Arc::new(std::sync::Mutex::new(Vec::<Vec<u8>>::new()));
+
+    let exec = WebRequest::get()
+        .with_env(
+            "RIPHT_FASTCGI_LATE_OUTPUT_PATH",
+            marker_path
+                .to_string_lossy()
+                .into_owned(),
+        )
+        .build(&script_path)
+        .expect("failed to build WebRequest");
+
+    let result = php
+        .execute_with_hooks(
+            exec,
+            OutputCaptureHooks {
+                outputs: Arc::clone(&outputs),
+                action: OutputAction::Done,
+            },
+        )
+        .expect("execute_with_hooks() failed");
+
+    assert!(result.body().is_empty());
+    assert!(result
+        .header_val("X-Ripht-Before-Finish")
+        .is_some());
+    assert!(result
+        .header_val("X-Ripht-After-Finish")
+        .is_none());
+
+    let outputs = outputs.lock().unwrap();
+    assert_eq!(outputs.len(), 1);
+
+    let body = String::from_utf8_lossy(&outputs[0]);
+    assert!(body.contains("\"before\":true"));
+    assert!(!body.contains("after"));
+
+    let marker: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(&marker_path)
+            .expect("late-output fixture should write marker sidecar"),
+    )
+    .expect("late-output sidecar should be valid JSON");
+
+    assert_eq!(marker["finished"], true);
+    assert_eq!(marker["marker"], "late-output-complete");
+
+    let _ = std::fs::remove_file(marker_path);
+}
+
+#[test]
+fn execute_with_hooks_fastcgi_finish_finalizes_output_handlers() {
+    let php = RiphtSapi::instance();
+    let script_path =
+        php_script_path("fastcgi_finish_final_output_handler.php");
+    let marker_path = sidecar_path("hooks-final-output-handler");
+    let _ = std::fs::remove_file(&marker_path);
+    let outputs = Arc::new(std::sync::Mutex::new(Vec::<Vec<u8>>::new()));
+
+    let exec = WebRequest::get()
+        .with_env(
+            "RIPHT_FASTCGI_FINAL_HANDLER_PATH",
+            marker_path
+                .to_string_lossy()
+                .into_owned(),
+        )
+        .build(&script_path)
+        .expect("failed to build WebRequest");
+
+    let result = php
+        .execute_with_hooks(
+            exec,
+            OutputCaptureHooks {
+                outputs: Arc::clone(&outputs),
+                action: OutputAction::Continue,
+            },
+        )
+        .expect("execute_with_hooks() failed");
+
+    let outputs = outputs.lock().unwrap();
+    assert_eq!(outputs.len(), 1);
+    assert_eq!(outputs[0], b"before|final");
+    assert_eq!(result.body(), b"before|final");
+
+    let marker: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(&marker_path)
+            .expect("final-handler fixture should write marker sidecar"),
+    )
+    .expect("final-handler sidecar should be valid JSON");
+
+    assert_eq!(marker["finished"], true);
+    assert_eq!(marker["marker"], "final-handler-complete");
+
+    let _ = std::fs::remove_file(marker_path);
 }
 
 #[test]

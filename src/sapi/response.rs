@@ -120,6 +120,91 @@ impl BufferedResponseSink {
     }
 }
 
+pub(crate) struct StreamingResponseSink<F>
+where
+    F: FnMut(&[u8]),
+{
+    output: F,
+    finished: bool,
+    aborted: bool,
+}
+
+impl<F> StreamingResponseSink<F>
+where
+    F: FnMut(&[u8]),
+{
+    pub(crate) fn new(output: F) -> Self {
+        Self {
+            output,
+            finished: false,
+            aborted: false,
+        }
+    }
+}
+
+impl<F> ResponseSink for StreamingResponseSink<F>
+where
+    F: FnMut(&[u8]),
+{
+    fn send_headers(
+        &mut self,
+        _status: u16,
+        _headers: &[ResponseHeader],
+    ) -> SinkResult {
+        if self.aborted {
+            return SinkResult::Abort;
+        }
+
+        SinkResult::Continue
+    }
+
+    fn write(&mut self, bytes: &[u8]) -> SinkResult {
+        if self.finished {
+            return SinkResult::Closed;
+        }
+
+        if self.aborted {
+            return SinkResult::Abort;
+        }
+
+        (self.output)(bytes);
+        SinkResult::Continue
+    }
+
+    fn flush(&mut self) -> SinkResult {
+        if self.aborted {
+            return SinkResult::Abort;
+        }
+
+        SinkResult::Continue
+    }
+
+    fn finish(&mut self) -> SinkResult {
+        if self.aborted {
+            return SinkResult::Abort;
+        }
+
+        if self.finished {
+            return SinkResult::Closed;
+        }
+
+        self.finished = true;
+        SinkResult::Continue
+    }
+
+    fn abort(&mut self, _reason: AbortReason) {
+        if self.finished {
+            return;
+        }
+
+        self.aborted = true;
+    }
+
+    fn is_finished(&self) -> bool {
+        self.finished
+    }
+}
+
 impl ResponseSink for BufferedResponseSink {
     fn send_headers(
         &mut self,

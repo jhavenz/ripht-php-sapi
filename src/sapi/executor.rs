@@ -3,7 +3,9 @@
 //! Manages the PHP request lifecycle: startup, script execution, and shutdown.
 
 use std::any::TypeId;
+use std::cell::RefCell;
 use std::ffi::CString;
+use std::rc::Rc;
 
 use thiserror::Error;
 
@@ -11,6 +13,7 @@ use thiserror::Error;
 use tracing::{debug, error, trace};
 
 use super::ffi;
+use super::response::StreamingResponseSink;
 use super::server_context::ServerContext;
 use super::SapiError;
 use crate::execution::{
@@ -84,8 +87,10 @@ impl<'sapi> Executor<'sapi> {
 
         let script_cstr = ctx.path_as_cstring()?;
 
-        let mut server_ctx = Box::<ServerContext>::from(ctx);
-        server_ctx.set_output_callback(on_output);
+        let server_ctx = ServerContext::from_context_with_sink(
+            ctx,
+            Box::new(StreamingResponseSink::new(on_output)),
+        );
 
         // SAFETY: Ownership transfer for request execution. ServerContext is boxed,
         // stored in sapi_globals.server_context, then reclaimed after php_request_shutdown.
@@ -110,8 +115,9 @@ impl<'sapi> Executor<'sapi> {
             ffi::php_request_shutdown(std::ptr::null_mut());
             ffi::sapi_globals.server_context = std::ptr::null_mut();
 
-            let server_ctx = Box::from_raw(ctx_ptr);
+            let mut server_ctx = Box::from_raw(ctx_ptr);
             Self::cleanup_globals();
+            server_ctx.finalize_response();
 
             Ok((*server_ctx).into_result(Vec::new()))
         }
@@ -196,7 +202,7 @@ impl<'sapi> Executor<'sapi> {
     pub fn execute_with_hooks<H: ExecutionHooks + 'static>(
         &self,
         ctx: ExecutionContext,
-        mut hooks: H,
+        hooks: H,
     ) -> Result<ExecutionResult, ExecutionError> {
         #[cfg(feature = "tracing")]
         debug!(
@@ -219,9 +225,18 @@ impl<'sapi> Executor<'sapi> {
         let script_cstr = ctx.path_as_cstring()?;
         let script_path = ctx.script_path.clone();
 
-        hooks.on_context_created();
+        let hooks = Rc::new(RefCell::new(hooks));
+        hooks
+            .borrow_mut()
+            .on_context_created();
 
-        let server_ctx = Box::<ServerContext>::from(ctx);
+        let mut server_ctx = Box::<ServerContext>::from(ctx);
+        let flush_hooks = Rc::clone(&hooks);
+        server_ctx.set_flush_callback(move || {
+            flush_hooks
+                .borrow_mut()
+                .on_flush();
+        });
 
         // SAFETY: Same ownership transfer pattern as execute_streaming.
         unsafe {
@@ -229,7 +244,9 @@ impl<'sapi> Executor<'sapi> {
             ffi::sapi_globals.server_context = ctx_ptr as *mut std::ffi::c_void;
             Self::setup_globals(&*ctx_ptr);
 
-            hooks.on_request_starting();
+            hooks
+                .borrow_mut()
+                .on_request_starting();
 
             #[cfg(feature = "tracing")]
             trace!("Starting PHP request");
@@ -248,8 +265,12 @@ impl<'sapi> Executor<'sapi> {
 
             Self::apply_ini_overrides(&*ctx_ptr);
 
-            hooks.on_request_started();
-            hooks.on_script_executing(&script_path);
+            hooks
+                .borrow_mut()
+                .on_request_started();
+            hooks
+                .borrow_mut()
+                .on_script_executing(&script_path);
 
             #[cfg(feature = "tracing")]
             trace!("Executing script");
@@ -257,9 +278,13 @@ impl<'sapi> Executor<'sapi> {
             let exec_result = Self::run_script(&script_cstr);
             let exit_status = ffi::ripht_php_sapi_exit_status();
             let success = exec_result != ffi::FAILURE;
-            hooks.on_script_executed(success);
+            hooks
+                .borrow_mut()
+                .on_script_executed(success);
 
-            hooks.on_request_finishing();
+            hooks
+                .borrow_mut()
+                .on_request_finishing();
 
             #[cfg(feature = "tracing")]
             trace!("Shutting down request");
@@ -281,21 +306,32 @@ impl<'sapi> Executor<'sapi> {
                     server_ctx
                         .response_headers
                         .iter()
-                        .filter(|h| hooks.on_header(h.name(), h.value()))
+                        .filter(|h| {
+                            hooks
+                                .borrow_mut()
+                                .on_header(h.name(), h.value())
+                        })
                         .cloned()
                         .collect()
                 };
 
             let status = server_ctx.status_code();
-            hooks.on_status(status);
+            hooks
+                .borrow_mut()
+                .on_status(status);
 
             for message in &server_ctx.messages {
-                hooks.on_php_message(message);
+                hooks
+                    .borrow_mut()
+                    .on_php_message(message);
             }
 
             let output = server_ctx.take_response_output();
 
-            let body = match hooks.on_output(&output) {
+            let body = match hooks
+                .borrow_mut()
+                .on_output(&output)
+            {
                 OutputAction::Continue => output,
                 OutputAction::Done => Vec::new(),
             };
@@ -322,7 +358,9 @@ impl<'sapi> Executor<'sapi> {
                 server_ctx.messages,
             );
 
-            hooks.on_request_finished(&result);
+            hooks
+                .borrow_mut()
+                .on_request_finished(&result);
 
             Ok(result)
         }
