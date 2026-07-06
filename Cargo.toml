@@ -12,6 +12,11 @@ categories = ["api-bindings", "web-programming"]
 readme = "README.md"
 documentation = "https://docs.rs/ripht-php-sapi"
 
+[workspace]
+members = [".", "gauntlets"]
+default-members = ["."]
+resolver = "2"
+
 [dependencies]
 libc = "0.2"
 serde = { version = "1.0", features = ["derive"], optional = true }

@@ -538,6 +538,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ripht-sapi-gauntlet"
+version = "0.0.0"
+dependencies = [
+ "ripht-php-sapi",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "rmp"
 version = "0.8.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
