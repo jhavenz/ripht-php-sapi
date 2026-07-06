@@ -1,9 +1,11 @@
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use ripht_php_sapi::{
-    AbortReason, ExecutionContext, ExecutionHooks, OutputAction,
-    ResponseHeader, ResponseSink, RiphtSapi, SinkResult, WebRequest,
+    AbortReason, ExecutionContext, ExecutionControl, ExecutionHooks,
+    ExecutionOptions, OutputAction, ResponseHeader, ResponseSink, RiphtSapi,
+    SinkResult, WebRequest,
 };
 
 fn php_script_path(name: &str) -> PathBuf {
@@ -170,6 +172,91 @@ impl ResponseSink for RecordingSink {
             .push(SinkEvent::Finish { marker_exists });
 
         self.finish_result
+    }
+
+    fn abort(&mut self, reason: AbortReason) {
+        self.events
+            .lock()
+            .unwrap()
+            .push(SinkEvent::Abort(reason));
+    }
+
+    fn is_finished(&self) -> bool {
+        self.finished
+    }
+}
+
+struct CancellingSink {
+    events: Arc<std::sync::Mutex<Vec<SinkEvent>>>,
+    control: Arc<ExecutionControl>,
+    finished: bool,
+}
+
+impl CancellingSink {
+    fn new(
+        events: Arc<std::sync::Mutex<Vec<SinkEvent>>>,
+        control: Arc<ExecutionControl>,
+    ) -> Self {
+        Self {
+            events,
+            control,
+            finished: false,
+        }
+    }
+}
+
+impl ResponseSink for CancellingSink {
+    fn send_headers(
+        &mut self,
+        status: u16,
+        headers: &[ResponseHeader],
+    ) -> SinkResult {
+        let headers = headers
+            .iter()
+            .map(|header| {
+                (header.name().to_string(), header.value().to_string())
+            })
+            .collect();
+
+        self.events
+            .lock()
+            .unwrap()
+            .push(SinkEvent::Headers(status, headers));
+
+        SinkResult::Continue
+    }
+
+    fn write(&mut self, bytes: &[u8]) -> SinkResult {
+        self.events
+            .lock()
+            .unwrap()
+            .push(SinkEvent::Write(
+                String::from_utf8_lossy(bytes).into_owned(),
+            ));
+        self.control.cancel();
+
+        SinkResult::Continue
+    }
+
+    fn flush(&mut self) -> SinkResult {
+        self.events
+            .lock()
+            .unwrap()
+            .push(SinkEvent::Flush);
+
+        SinkResult::Continue
+    }
+
+    fn finish(&mut self) -> SinkResult {
+        self.finished = true;
+        self.events
+            .lock()
+            .unwrap()
+            .push(SinkEvent::Finish {
+                marker_exists: None,
+            });
+
+        SinkResult::Continue
     }
 
     fn abort(&mut self, reason: AbortReason) {
@@ -414,6 +501,42 @@ fn fastcgi_finish_request_finalizes_output_handlers() {
 }
 
 #[test]
+fn duplicate_fastcgi_finish_does_not_drain_new_buffers() {
+    let php = RiphtSapi::instance();
+    let script_path = php_script_path("fastcgi_finish_duplicate_buffers.php");
+    let marker_path = sidecar_path("fastcgi-finish-duplicate-buffers");
+    let _ = std::fs::remove_file(&marker_path);
+
+    let exec = WebRequest::get()
+        .with_env(
+            "RIPHT_FASTCGI_FINISH_RESULT",
+            marker_path
+                .to_string_lossy()
+                .into_owned(),
+        )
+        .build(&script_path)
+        .expect("failed to build WebRequest");
+
+    let result = php
+        .execute(exec)
+        .expect("fastcgi_finish_duplicate_buffers.php execution failed");
+
+    assert_eq!(result.body_string(), "before");
+
+    let marker: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&marker_path).expect(
+            "fastcgi_finish_duplicate_buffers.php should write marker sidecar",
+        ))
+        .expect("marker sidecar should contain valid JSON");
+
+    assert_eq!(marker["first"], true);
+    assert_eq!(marker["second"], false);
+    assert_eq!(marker["post_finish_buffer"], "after");
+
+    let _ = std::fs::remove_file(marker_path);
+}
+
+#[test]
 fn host_sink_observes_headers_body_flush_finish_in_order() {
     let php = RiphtSapi::instance();
     let script_path = php_script_path("sink_events.php");
@@ -634,24 +757,28 @@ fn host_sink_closed_write_reports_client_closed_and_aborts_sink() {
     let php = RiphtSapi::instance();
     let script_path = php_script_path("sink_events.php");
     let events = Arc::new(std::sync::Mutex::new(Vec::<SinkEvent>::new()));
+    let control = Arc::new(ExecutionControl::new());
 
     let exec = WebRequest::get()
         .build(&script_path)
         .expect("failed to build WebRequest");
 
     let report = php
-        .execute_with_sink(
+        .execute_with_sink_and_options(
             exec,
             RecordingSink::with_write_result(
                 Arc::clone(&events),
                 SinkResult::Closed,
             ),
+            ExecutionOptions::with_control(Arc::clone(&control)),
         )
-        .expect("execute_with_sink() failed");
+        .expect("execute_with_sink_and_options() failed");
 
     assert!(report.php_success);
-    assert!(report.aborted);
-    assert_eq!(report.abort_reason, Some(AbortReason::ClientClosed));
+    assert!(!report.aborted);
+    assert!(report.client_closed);
+    assert_eq!(report.abort_reason, None);
+    assert!(control.is_client_closed());
 
     let events = events.lock().unwrap();
     assert!(matches!(
@@ -665,6 +792,168 @@ fn host_sink_closed_write_reports_client_closed_and_aborts_sink() {
     assert!(!events
         .iter()
         .any(|event| matches!(event, SinkEvent::Finish { .. })));
+}
+
+#[test]
+fn execute_with_sink_and_options_uses_default_options() {
+    let php = RiphtSapi::instance();
+    let script_path = php_script_path("sink_events.php");
+    let events = Arc::new(std::sync::Mutex::new(Vec::<SinkEvent>::new()));
+
+    let exec = WebRequest::get()
+        .build(&script_path)
+        .expect("failed to build WebRequest");
+
+    let report = php
+        .execute_with_sink_and_options(
+            exec,
+            RecordingSink::new(Arc::clone(&events)),
+            ExecutionOptions::default(),
+        )
+        .expect("execute_with_sink_and_options() failed");
+
+    assert!(report.php_success);
+    assert!(!report.aborted);
+    assert!(!report.client_closed);
+    assert_eq!(report.abort_reason, None);
+    assert!(events
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|event| matches!(event, SinkEvent::Finish { .. })));
+}
+
+#[test]
+fn host_can_cancel_running_request() {
+    let php = RiphtSapi::instance();
+    let script_path = php_script_path("control_probe.php");
+    let marker_path = sidecar_path("host-can-cancel-running-request");
+    let _ = std::fs::remove_file(&marker_path);
+    let events = Arc::new(std::sync::Mutex::new(Vec::<SinkEvent>::new()));
+    let control = Arc::new(ExecutionControl::new());
+
+    let exec = WebRequest::get()
+        .with_env(
+            "RIPHT_CONTROL_SHUTDOWN_PATH",
+            marker_path
+                .to_string_lossy()
+                .into_owned(),
+        )
+        .build(&script_path)
+        .expect("failed to build WebRequest");
+
+    let report = php
+        .execute_with_sink_and_options(
+            exec,
+            CancellingSink::new(Arc::clone(&events), Arc::clone(&control)),
+            ExecutionOptions::with_control(Arc::clone(&control)),
+        )
+        .expect("execute_with_sink_and_options() failed");
+
+    assert!(report.php_success);
+    assert!(report.aborted);
+    assert!(!report.client_closed);
+    assert_eq!(report.abort_reason, Some(AbortReason::HostAbort));
+    assert!(control.is_cancelled());
+    assert_eq!(
+        std::fs::read_to_string(&marker_path)
+            .expect("control_probe.php should write shutdown sidecar"),
+        "shutdown"
+    );
+
+    let events = events.lock().unwrap();
+    assert!(events.iter().any(
+        |event| matches!(event, SinkEvent::Write(body) if body == "alpha")
+    ));
+    assert!(events
+        .iter()
+        .any(|event| matches!(
+            event,
+            SinkEvent::Abort(AbortReason::HostAbort)
+        )));
+    assert!(!events.iter().any(
+        |event| matches!(event, SinkEvent::Write(body) if body == "omega")
+    ));
+
+    let _ = std::fs::remove_file(marker_path);
+}
+
+#[test]
+fn deadline_exceeded_sets_deadline_abort_reason() {
+    let php = RiphtSapi::instance();
+    let script_path = php_script_path("sink_events.php");
+    let events = Arc::new(std::sync::Mutex::new(Vec::<SinkEvent>::new()));
+    let control = Arc::new(ExecutionControl::new());
+
+    let exec = WebRequest::get()
+        .build(&script_path)
+        .expect("failed to build WebRequest");
+
+    let report = php
+        .execute_with_sink_and_options(
+            exec,
+            RecordingSink::new(Arc::clone(&events)),
+            ExecutionOptions::with_control(Arc::clone(&control))
+                .deadline(Instant::now() - Duration::from_secs(1)),
+        )
+        .expect("execute_with_sink_and_options() failed");
+
+    assert!(report.php_success);
+    assert!(report.aborted);
+    assert!(!report.client_closed);
+    assert_eq!(report.abort_reason, Some(AbortReason::DeadlineExceeded));
+    assert!(control.is_deadline_exceeded());
+
+    let events = events.lock().unwrap();
+    assert!(events
+        .iter()
+        .any(|event| matches!(
+            event,
+            SinkEvent::Abort(AbortReason::DeadlineExceeded)
+        )));
+    assert!(!events
+        .iter()
+        .any(|event| matches!(event, SinkEvent::Write(_))));
+}
+
+#[test]
+fn cancel_or_deadline_does_not_skip_request_shutdown() {
+    let php = RiphtSapi::instance();
+    let script_path = php_script_path("control_probe.php");
+    let marker_path = sidecar_path("deadline-does-not-skip-shutdown");
+    let _ = std::fs::remove_file(&marker_path);
+    let events = Arc::new(std::sync::Mutex::new(Vec::<SinkEvent>::new()));
+
+    let exec = WebRequest::get()
+        .with_env(
+            "RIPHT_CONTROL_SHUTDOWN_PATH",
+            marker_path
+                .to_string_lossy()
+                .into_owned(),
+        )
+        .build(&script_path)
+        .expect("failed to build WebRequest");
+
+    let report = php
+        .execute_with_sink_and_options(
+            exec,
+            RecordingSink::new(Arc::clone(&events)),
+            ExecutionOptions::with_deadline(
+                Instant::now() - Duration::from_secs(1),
+            ),
+        )
+        .expect("execute_with_sink_and_options() failed");
+
+    assert!(report.php_success);
+    assert!(report.aborted);
+    assert_eq!(report.abort_reason, Some(AbortReason::DeadlineExceeded));
+    assert_eq!(
+        std::fs::read_to_string(&marker_path)
+            .expect("control_probe.php should write shutdown sidecar"),
+        "shutdown"
+    );
+
+    let _ = std::fs::remove_file(marker_path);
 }
 
 #[test]

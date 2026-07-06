@@ -52,6 +52,10 @@ pub fn finish_current_request() -> bool {
                 return false;
             };
 
+            if !(*ctx_ptr).can_finish_response() {
+                return false;
+            }
+
             ffi::php_output_end_all();
 
             if ffi::sapi_globals.headers_sent == 0 {

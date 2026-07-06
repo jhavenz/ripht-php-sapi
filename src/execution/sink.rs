@@ -13,6 +13,8 @@ pub enum SinkResult {
 pub enum AbortReason {
     ClientClosed,
     SinkFailure,
+    HostAbort,
+    DeadlineExceeded,
 }
 
 pub trait ResponseSink {

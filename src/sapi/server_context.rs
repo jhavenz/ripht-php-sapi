@@ -1,10 +1,12 @@
 use std::cell::Cell;
 use std::ffi::CString;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
+use std::time::Instant;
 
 use crate::execution::{
-    AbortReason, ExecutionContext, ExecutionMessage, ExecutionReport,
-    ExecutionResult, ResponseHeader, ResponseSink, SinkResult,
+    AbortReason, ExecutionContext, ExecutionControl, ExecutionMessage,
+    ExecutionOptions, ExecutionReport, ExecutionReportParts, ExecutionResult,
+    ResponseHeader, ResponseSink, SinkResult,
 };
 use crate::sapi::response::{BufferedResponseSink, ResponseLifecycle};
 use crate::sapi::ServerVarsCString;
@@ -156,6 +158,7 @@ pub struct ServerContext {
     status_code: Cell<u16>,
     response: ResponseLifecycle,
     sink: ResponseTarget,
+    control: Arc<ExecutionControl>,
     pub post_data: Vec<u8>,
     post_position: Cell<usize>,
     pub messages: Vec<ExecutionMessage>,
@@ -175,22 +178,34 @@ impl Default for ServerContext {
 
 impl ServerContext {
     pub fn new() -> Self {
-        Self::with_response_target(ResponseTarget::buffered(
-            buffer_policy().initial_cap,
-        ))
+        Self::with_response_target(
+            ResponseTarget::buffered(buffer_policy().initial_cap),
+            ExecutionOptions::default(),
+        )
     }
 
     pub(crate) fn with_response_sink(sink: Box<dyn ResponseSink>) -> Self {
-        Self::with_response_target(ResponseTarget::host(sink))
+        Self::with_response_sink_and_options(sink, ExecutionOptions::default())
     }
 
-    fn with_response_target(sink: ResponseTarget) -> Self {
+    pub(crate) fn with_response_sink_and_options(
+        sink: Box<dyn ResponseSink>,
+        options: ExecutionOptions,
+    ) -> Self {
+        Self::with_response_target(ResponseTarget::host(sink), options)
+    }
+
+    fn with_response_target(
+        sink: ResponseTarget,
+        options: ExecutionOptions,
+    ) -> Self {
         Self {
             post_data: Vec::new(),
             post_position: Cell::new(0),
             status_code: Cell::new(200),
             response: ResponseLifecycle::default(),
             sink,
+            control: options.into_control(),
             messages: Vec::with_capacity(8),
             vars: None,
             env_vars: Vec::new(),
@@ -262,6 +277,10 @@ impl ServerContext {
     }
 
     pub fn write_output(&mut self, data: &[u8]) -> usize {
+        if self.stop_delivery_if_controlled() {
+            return data.len();
+        }
+
         if !self.response.can_write() {
             return data.len();
         }
@@ -299,15 +318,9 @@ impl ServerContext {
     }
 
     fn write_to_sink(&mut self, data: &[u8]) -> usize {
-        match self.sink.write(data) {
-            SinkResult::Continue => {}
-            SinkResult::Closed => {
-                self.abort_response(AbortReason::ClientClosed);
-            }
-            SinkResult::Abort => {
-                self.abort_response(AbortReason::SinkFailure);
-            }
-        }
+        let result = self.sink.write(data);
+
+        self.apply_sink_result(result);
 
         data.len()
     }
@@ -343,6 +356,10 @@ impl ServerContext {
     }
 
     pub fn finalize_headers(&mut self) -> bool {
+        if self.stop_delivery_if_controlled() {
+            return false;
+        }
+
         if self
             .response
             .headers_finalized()
@@ -354,19 +371,12 @@ impl ServerContext {
             .sink
             .send_headers(self.status_code(), &self.response_headers);
 
-        match result {
-            SinkResult::Continue => self
-                .response
-                .finalize_headers(),
-            SinkResult::Closed => {
-                self.abort_response(AbortReason::ClientClosed);
-                false
-            }
-            SinkResult::Abort => {
-                self.abort_response(AbortReason::SinkFailure);
-                false
-            }
+        if !self.apply_sink_result(result) {
+            return false;
         }
+
+        self.response
+            .finalize_headers()
     }
 
     pub fn set_status(&self, code: u16) {
@@ -382,20 +392,18 @@ impl ServerContext {
     }
 
     pub fn flush(&mut self) {
+        if self.stop_delivery_if_controlled() {
+            return;
+        }
+
         if !self.response.can_flush() {
             return;
         }
 
-        match self.sink.flush() {
-            SinkResult::Continue => {}
-            SinkResult::Closed => {
-                self.abort_response(AbortReason::ClientClosed);
-                return;
-            }
-            SinkResult::Abort => {
-                self.abort_response(AbortReason::SinkFailure);
-                return;
-            }
+        let result = self.sink.flush();
+
+        if !self.apply_sink_result(result) {
+            return;
         }
 
         if let Some(ref mut callback) = self.flush_callback {
@@ -412,20 +420,18 @@ impl ServerContext {
     }
 
     fn finish_response(&mut self, finalized_early: bool) -> bool {
+        if self.stop_delivery_if_controlled() {
+            return false;
+        }
+
         if !self.response.can_finish() {
             return false;
         }
 
-        match self.sink.finish() {
-            SinkResult::Continue => {}
-            SinkResult::Closed => {
-                self.abort_response(AbortReason::ClientClosed);
-                return false;
-            }
-            SinkResult::Abort => {
-                self.abort_response(AbortReason::SinkFailure);
-                return false;
-            }
+        let result = self.sink.finish();
+
+        if !self.apply_sink_result(result) {
+            return false;
         }
 
         let finished = if finalized_early {
@@ -456,6 +462,30 @@ impl ServerContext {
         true
     }
 
+    pub(crate) fn mark_client_closed(&mut self) -> bool {
+        self.control
+            .mark_client_closed();
+
+        if !self
+            .response
+            .mark_client_closed()
+        {
+            return false;
+        }
+
+        self.sink
+            .abort(AbortReason::ClientClosed);
+        true
+    }
+
+    pub(crate) fn can_finish_response(&self) -> bool {
+        self.response.can_finish()
+    }
+
+    pub(crate) fn observe_control_state(&mut self) -> bool {
+        self.stop_delivery_if_controlled()
+    }
+
     pub(crate) fn finalized_early(&self) -> bool {
         self.response
             .finalized_early()
@@ -467,6 +497,52 @@ impl ServerContext {
 
     pub(crate) fn abort_reason(&self) -> Option<AbortReason> {
         self.response.abort_reason()
+    }
+
+    pub(crate) fn client_closed(&self) -> bool {
+        self.response.client_closed()
+            || self
+                .control
+                .is_client_closed()
+    }
+
+    fn stop_delivery_if_controlled(&mut self) -> bool {
+        if self
+            .control
+            .deadline_exceeded(Instant::now())
+        {
+            self.abort_response(AbortReason::DeadlineExceeded);
+            return true;
+        }
+
+        if self.control.is_cancelled() {
+            self.abort_response(AbortReason::HostAbort);
+            return true;
+        }
+
+        if self
+            .control
+            .is_client_closed()
+        {
+            self.mark_client_closed();
+            return true;
+        }
+
+        false
+    }
+
+    fn apply_sink_result(&mut self, result: SinkResult) -> bool {
+        match result {
+            SinkResult::Continue => true,
+            SinkResult::Closed => {
+                self.mark_client_closed();
+                false
+            }
+            SinkResult::Abort => {
+                self.abort_response(AbortReason::SinkFailure);
+                false
+            }
+        }
     }
 
     pub fn get_env(&self, key: &[u8]) -> Option<*const std::ffi::c_char> {
@@ -491,15 +567,16 @@ impl ServerContext {
         exit_status: i32,
         php_success: bool,
     ) -> ExecutionReport {
-        ExecutionReport::new(
-            self.status_code.get(),
+        ExecutionReport::new(ExecutionReportParts {
+            status_code: self.status_code.get(),
             exit_status,
             php_success,
-            self.finalized_early(),
-            self.aborted(),
-            self.abort_reason(),
-            self.messages,
-        )
+            finalized_early: self.finalized_early(),
+            aborted: self.aborted(),
+            client_closed: self.client_closed(),
+            abort_reason: self.abort_reason(),
+            messages: self.messages,
+        })
     }
 
     pub(crate) fn from_context_with_sink(
@@ -507,6 +584,18 @@ impl ServerContext {
         sink: Box<dyn ResponseSink>,
     ) -> Box<ServerContext> {
         let mut server_ctx = Box::new(ServerContext::with_response_sink(sink));
+        server_ctx.apply_context(ctx);
+        server_ctx
+    }
+
+    pub(crate) fn from_context_with_sink_and_options(
+        ctx: ExecutionContext,
+        sink: Box<dyn ResponseSink>,
+        options: ExecutionOptions,
+    ) -> Box<ServerContext> {
+        let mut server_ctx = Box::new(
+            ServerContext::with_response_sink_and_options(sink, options),
+        );
         server_ctx.apply_context(ctx);
         server_ctx
     }

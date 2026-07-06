@@ -17,8 +17,8 @@ use super::response::StreamingResponseSink;
 use super::server_context::ServerContext;
 use super::SapiError;
 use crate::execution::{
-    ExecutionContext, ExecutionHooks, ExecutionReport, ExecutionResult,
-    NoOpHooks, OutputAction, ResponseHeader, ResponseSink,
+    ExecutionContext, ExecutionHooks, ExecutionOptions, ExecutionReport,
+    ExecutionResult, NoOpHooks, OutputAction, ResponseHeader, ResponseSink,
 };
 
 /// Errors that can occur during PHP script execution.
@@ -131,6 +131,22 @@ impl<'sapi> Executor<'sapi> {
     where
         S: ResponseSink + 'static,
     {
+        self.execute_with_sink_and_options(
+            ctx,
+            sink,
+            ExecutionOptions::default(),
+        )
+    }
+
+    pub fn execute_with_sink_and_options<S>(
+        &self,
+        ctx: ExecutionContext,
+        sink: S,
+        options: ExecutionOptions,
+    ) -> Result<ExecutionReport, ExecutionError>
+    where
+        S: ResponseSink + 'static,
+    {
         #[cfg(feature = "tracing")]
         debug!(
             script_path = %ctx.script_path.display(),
@@ -150,8 +166,11 @@ impl<'sapi> Executor<'sapi> {
         }
 
         let script_cstr = ctx.path_as_cstring()?;
-        let server_ctx =
-            ServerContext::from_context_with_sink(ctx, Box::new(sink));
+        let server_ctx = ServerContext::from_context_with_sink_and_options(
+            ctx,
+            Box::new(sink),
+            options,
+        );
 
         // SAFETY: Same ownership transfer pattern as execute_with_hooks.
         unsafe {
@@ -182,6 +201,7 @@ impl<'sapi> Executor<'sapi> {
             let exec_result = Self::run_script(&script_cstr);
             let exit_status = ffi::ripht_php_sapi_exit_status();
             let success = exec_result != ffi::FAILURE;
+            (*ctx_ptr).observe_control_state();
 
             #[cfg(feature = "tracing")]
             trace!("Shutting down request");

@@ -37,8 +37,8 @@ pub use executor::{ExecutionError, Executor};
 pub(crate) use server_vars::{ServerVars, ServerVarsCString};
 
 use crate::execution::{
-    ExecutionContext, ExecutionHooks, ExecutionReport, ExecutionResult,
-    ResponseSink,
+    ExecutionContext, ExecutionHooks, ExecutionOptions, ExecutionReport,
+    ExecutionResult, ResponseSink,
 };
 use config::ResolvedConfig;
 
@@ -371,6 +371,20 @@ impl RiphtSapi {
         self.executor()
             .map_err(|_| ExecutionError::NotInitialized)?
             .execute_with_sink(ctx, sink)
+    }
+
+    pub fn execute_with_sink_and_options<S>(
+        &self,
+        ctx: ExecutionContext,
+        sink: S,
+        options: ExecutionOptions,
+    ) -> Result<ExecutionReport, ExecutionError>
+    where
+        S: ResponseSink + 'static,
+    {
+        self.executor()
+            .map_err(|_| ExecutionError::NotInitialized)?
+            .execute_with_sink_and_options(ctx, sink, options)
     }
 
     pub fn is_initialized(&self) -> bool {

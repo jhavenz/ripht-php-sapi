@@ -5,6 +5,7 @@ pub(crate) struct ResponseLifecycle {
     headers_finalized: bool,
     response_finished: bool,
     response_aborted: bool,
+    client_closed: bool,
     finalized_early: bool,
     abort_reason: Option<AbortReason>,
 }
@@ -24,11 +25,11 @@ impl ResponseLifecycle {
     }
 
     pub(crate) fn can_write(&self) -> bool {
-        !self.response_finished && !self.response_aborted
+        !self.response_finished && !self.response_aborted && !self.client_closed
     }
 
     pub(crate) fn can_flush(&self) -> bool {
-        !self.response_finished && !self.response_aborted
+        !self.response_finished && !self.response_aborted && !self.client_closed
     }
 
     pub(crate) fn finish(&mut self) -> bool {
@@ -50,16 +51,27 @@ impl ResponseLifecycle {
     }
 
     pub(crate) fn can_finish(&self) -> bool {
-        !self.response_finished && !self.response_aborted
+        !self.response_finished && !self.response_aborted && !self.client_closed
     }
 
     pub(crate) fn abort(&mut self, reason: AbortReason) -> bool {
-        if self.response_finished || self.response_aborted {
+        if self.response_finished || self.response_aborted || self.client_closed
+        {
             return false;
         }
 
         self.response_aborted = true;
         self.abort_reason = Some(reason);
+        true
+    }
+
+    pub(crate) fn mark_client_closed(&mut self) -> bool {
+        if self.response_finished || self.response_aborted || self.client_closed
+        {
+            return false;
+        }
+
+        self.client_closed = true;
         true
     }
 
@@ -69,6 +81,10 @@ impl ResponseLifecycle {
 
     pub(crate) fn aborted(&self) -> bool {
         self.response_aborted
+    }
+
+    pub(crate) fn client_closed(&self) -> bool {
+        self.client_closed
     }
 
     pub(crate) fn abort_reason(&self) -> Option<AbortReason> {
