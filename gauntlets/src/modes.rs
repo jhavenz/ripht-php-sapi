@@ -164,18 +164,16 @@ fn sink_mode_events_are_valid(result: &RuntimeResult) -> bool {
         return true;
     }
 
-    matches!(result.events.first(), Some(LifecycleEvent::Headers { .. }))
-        && result.events.iter().any(|event| {
-            matches!(event, LifecycleEvent::Write { bytes } if bytes == b"alpha")
-        })
-        && result
-            .events
-            .iter()
-            .any(|event| matches!(event, LifecycleEvent::Flush))
-        && result.events.iter().any(|event| {
-            matches!(event, LifecycleEvent::Write { bytes } if bytes == b"omega")
-        })
-        && matches!(result.events.last(), Some(LifecycleEvent::Finish))
+    matches!(
+        result.events.as_slice(),
+        [
+            LifecycleEvent::Headers { .. },
+            LifecycleEvent::Write { bytes: alpha },
+            LifecycleEvent::Flush,
+            LifecycleEvent::Write { bytes: omega },
+            LifecycleEvent::Finish,
+        ] if alpha == b"alpha" && omega == b"omega"
+    )
 }
 
 fn expected_modes() -> Vec<RuntimeMode> {
@@ -198,7 +196,9 @@ fn now_unix_epoch_secs() -> std::io::Result<u64> {
 #[cfg(test)]
 mod tests {
     use super::{build_ripht_modes_report, evaluate_ripht_modes_results};
-    use crate::{RuntimeMode, RuntimeResult};
+    use crate::{
+        HeaderValue, LifecycleEvent, ReportMetadata, RuntimeMode, RuntimeResult,
+    };
 
     #[test]
     fn ripht_modes_report_requires_all_modes_to_pass() {
@@ -220,7 +220,7 @@ mod tests {
             case: "ripht_modes_sink_events".to_string(),
             status_code: Some(200),
             exit_status: Some(0),
-            headers: vec![crate::HeaderValue::new("X-Ripht-Sink", "yes")],
+            headers: vec![HeaderValue::new("X-Ripht-Sink", "yes")],
             body: b"wrong".to_vec(),
             messages: Vec::new(),
             report: None,
@@ -232,5 +232,96 @@ mod tests {
 
         assert!(!evaluate_ripht_modes_results(&mut results));
         assert!(results[0].failure.is_some());
+    }
+
+    #[test]
+    fn modes_evaluation_rejects_reordered_sink_events() {
+        let mut results = expected_modes_result_set();
+
+        results[3].events = vec![
+            LifecycleEvent::Headers {
+                status_code: 200,
+                headers: vec![HeaderValue::new("X-Ripht-Sink", "yes")],
+            },
+            LifecycleEvent::Write {
+                bytes: b"omega".to_vec(),
+            },
+            LifecycleEvent::Flush,
+            LifecycleEvent::Write {
+                bytes: b"alpha".to_vec(),
+            },
+            LifecycleEvent::Finish,
+        ];
+
+        assert!(!evaluate_ripht_modes_results(&mut results));
+        assert!(results[3].failure.is_some());
+    }
+
+    fn expected_modes_result_set() -> Vec<RuntimeResult> {
+        vec![
+            result_for_mode(RuntimeMode::RiphtBuffered),
+            result_for_mode(RuntimeMode::RiphtStreaming),
+            result_for_mode(RuntimeMode::RiphtHooks),
+            result_for_mode(RuntimeMode::RiphtSink),
+            result_for_mode(RuntimeMode::RiphtSinkWithOptions),
+        ]
+    }
+
+    fn result_for_mode(mode: RuntimeMode) -> RuntimeResult {
+        let is_sink_mode = matches!(
+            mode,
+            RuntimeMode::RiphtSink | RuntimeMode::RiphtSinkWithOptions
+        );
+
+        RuntimeResult {
+            runtime: "ripht".to_string(),
+            mode,
+            case: "ripht_modes_sink_events".to_string(),
+            status_code: Some(200),
+            exit_status: Some(0),
+            headers: vec![HeaderValue::new("X-Ripht-Sink", "yes")],
+            body: b"alphaomega".to_vec(),
+            messages: Vec::new(),
+            report: is_sink_mode.then(clean_report),
+            events: if is_sink_mode {
+                clean_sink_events()
+            } else {
+                Vec::new()
+            },
+            duration_ms: 0,
+            artifact_path: None,
+            failure: None,
+        }
+    }
+
+    fn clean_report() -> ReportMetadata {
+        ReportMetadata {
+            status_code: 200,
+            exit_status: 0,
+            php_success: true,
+            finalized_early: false,
+            aborted: false,
+            client_closed: false,
+            timed_out: false,
+            post_finish_duration_ms: None,
+            abort_reason: None,
+        }
+    }
+
+    fn clean_sink_events() -> Vec<LifecycleEvent> {
+        vec![
+            LifecycleEvent::Headers {
+                status_code: 200,
+                headers: vec![HeaderValue::new("X-Ripht-Sink", "yes")],
+            },
+            LifecycleEvent::Write {
+                bytes: b"alpha".to_vec(),
+            },
+            LifecycleEvent::Flush,
+            LifecycleEvent::Write {
+                bytes: b"omega".to_vec(),
+            },
+            LifecycleEvent::Finish,
+        ]
     }
 }
