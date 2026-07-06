@@ -12,12 +12,9 @@ This crate requires PHP built with `--enable-embed=static` (and typically `--dis
 
 [Static PHP CLI](https://github.com/crazywhalecc/static-php-cli) can simplify building PHP with the embed SAPI. For local development, prefer installing the generated prefix at `~/.ripht/php` so multiple Rust/PHP tools can share one static PHP build.
 
-```bash
-# From the Phalanx libs/bia directory, this installs the shared local prefix and keeps SPC build/cache files out of project repos.
-BIA_STATIC_PHP_PREFIX="$HOME/.ripht/php" SPC_WORK_DIR="$HOME/.ripht/spc-work" BIA_ALLOW_UNMARKED_PREFIX=1 ./scripts/build-static-engine.sh
-```
+Ripht consumes a PHP installation prefix, not an SPC or Bia source checkout. A compatible prefix contains `lib/libphp.a`; full shim and bindgen validation also use `include/php/`. Keep SPC work/cache directories outside this repo.
 
-Ripht automatically checks `~/.ripht/php` when `RIPHT_PHP_SAPI_PREFIX` is not set. Bia/static-php-cli prefixes should include `lib/bia-link-flags.txt`; Ripht consumes that linker manifest when present.
+Ripht automatically checks `~/.ripht/php` when `RIPHT_PHP_SAPI_PREFIX` is not set. Bia/static-php-cli prefixes should include `lib/bia-link-flags.txt`; Ripht consumes that linker manifest when present. Without the manifest, Ripht falls back to best-effort static dependency scanning from the prefix `lib/` directory.
 
 #### Option B: Manual PHP Build
 

@@ -4,6 +4,7 @@
 
 # Path to PHP build root containing lib/libphp.a (REQUIRED)
 # Omit this when using the recommended ~/.ripht/php fallback.
+# Prefixes may also provide lib/bia-link-flags.txt for exact static link flags.
 #RIPHT_PHP_SAPI_PREFIX = "/path/to/php-prefix"
 
 #### Benchmarking 

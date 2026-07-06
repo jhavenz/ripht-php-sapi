@@ -35,28 +35,33 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod build_contract;
+
+use build_contract::{
+    docs_rs_enabled, fallback_prefixes, invalid_prefix_message,
+    link_directives, missing_prefix_message, parse_manifest_tokens,
+    static_dependency_libraries, validate_php_prefix, LinkDirective,
+    LINK_MANIFEST, PHP_PREFIX_ENV,
+};
+
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-env-changed=RIPHT_PHP_SAPI_PREFIX");
+    println!("cargo:rerun-if-changed=build_contract.rs");
+    println!("cargo:rerun-if-env-changed={PHP_PREFIX_ENV}");
+    println!("cargo:rerun-if-env-changed=DOCS_RS");
     println!("cargo:rerun-if-env-changed=CC");
     println!("cargo:rustc-check-cfg=cfg(bindgen_available)");
 
-    if env::var("DOCS_RS").is_ok() {
+    if docs_rs_enabled(
+        env::var("DOCS_RS")
+            .ok()
+            .as_deref(),
+    ) {
         println!("cargo:warning=Building docs - skipping PHP linking");
         return;
     }
 
-    let prefix = find_php_prefix().unwrap_or_else(|| {
-        panic!(
-            "Could not locate a PHP build.\n\
-             \n\
-             Set RIPHT_PHP_SAPI_PREFIX to your PHP installation root containing:\n\
-             - lib/libphp.a (PHP embed SAPI)\n\
-             - include/php/ (PHP headers)\n\
-             \n\
-             Build PHP with: ./configure --enable-embed=static --disable-zts"
-        )
-    });
+    let prefix = find_php_prefix();
 
     println!("Using PHP prefix: {}", prefix.display());
 
@@ -65,7 +70,7 @@ fn main() {
         println!("cargo:rustc-link-search=native={}", lib_dir.display());
     }
 
-    let link_flags = lib_dir.join("bia-link-flags.txt");
+    let link_flags = lib_dir.join(LINK_MANIFEST);
     println!("cargo:rerun-if-changed={}", link_flags.display());
 
     let libphp_path = lib_dir.join("libphp.a");
@@ -93,63 +98,33 @@ fn main() {
     generate_bindgen_validation(&prefix);
 }
 
-fn find_php_prefix() -> Option<PathBuf> {
-    if let Ok(prefix) = env::var("RIPHT_PHP_SAPI_PREFIX") {
+fn find_php_prefix() -> PathBuf {
+    if let Ok(prefix) = env::var(PHP_PREFIX_ENV) {
         let path = PathBuf::from(&prefix);
         if validate_php_prefix(&path) {
-            return Some(path);
+            return path;
         }
-        println!("RIPHT_PHP_SAPI_PREFIX set but invalid: {}", prefix);
+
+        panic!("{}", invalid_prefix_message(&path));
     }
 
     let home = env::var("HOME").unwrap_or_else(|_| String::from("/root"));
-    let candidates = [
-        format!("{}/.ripht/php", home),
-        format!("{}/.local/php", home),
-        "/usr/local".to_string(),
-    ];
-
-    for candidate in &candidates {
-        let path = PathBuf::from(candidate);
+    for path in fallback_prefixes(&home) {
         if validate_php_prefix(&path) {
-            return Some(path);
+            return path;
         }
     }
 
-    None
-}
-
-fn validate_php_prefix(prefix: &Path) -> bool {
-    prefix.exists()
-        && prefix
-            .join("lib")
-            .join("libphp.a")
-            .exists()
+    panic!("{}", missing_prefix_message());
 }
 
 fn emit_link_flags(path: &Path) {
     let manifest =
         fs::read_to_string(path).expect("failed to read PHP linker manifest");
-
-    for line in manifest.lines() {
-        let Some((_, value)) = line.split_once('=') else {
-            continue;
-        };
-
-        emit_tokens(&split_shell_words(value));
-    }
-}
-
-fn emit_tokens(tokens: &[String]) {
+    let tokens = parse_manifest_tokens(&manifest);
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
 
-    if target_os == "linux" {
-        emit_linux_tokens(tokens);
-
-        return;
-    }
-
-    emit_cargo_tokens(tokens, &target_os);
+    emit_directives(&link_directives(&tokens, &target_os));
 }
 
 fn emit_macos_compiler_runtime() {
@@ -185,146 +160,28 @@ fn emit_macos_compiler_runtime() {
     println!("cargo:rustc-link-arg={path}");
 }
 
-fn emit_linux_tokens(tokens: &[String]) {
-    for token in tokens {
-        if token.starts_with("-L") && token.len() > 2 {
-            println!("cargo:rustc-link-search=native={}", &token[2..]);
-        }
-    }
-
-    println!("cargo:rustc-link-arg=-Wl,--start-group");
-
-    for token in tokens {
-        if token.starts_with("-l") && token.len() > 2 {
-            println!("cargo:rustc-link-arg={token}");
-        }
-    }
-
-    println!("cargo:rustc-link-arg=-Wl,--end-group");
-
-    for token in tokens {
-        match token.as_str() {
-            "-pthread" => println!("cargo:rustc-link-arg=-pthread"),
-            token if token.starts_with("-Wl,") => {
-                println!("cargo:rustc-link-arg={token}")
+fn emit_directives(directives: &[LinkDirective]) {
+    for directive in directives {
+        match directive {
+            LinkDirective::SearchPath(path) => {
+                println!("cargo:rustc-link-search=native={path}");
             }
-            _ => {}
-        }
-    }
-}
-
-fn emit_cargo_tokens(tokens: &[String], target_os: &str) {
-    let mut i = 0;
-
-    while i < tokens.len() {
-        match tokens[i].as_str() {
-            "-framework" => {
-                if let Some(name) = tokens.get(i + 1) {
-                    println!("cargo:rustc-link-lib=framework={name}");
-                    i += 2;
-                    continue;
-                }
-            }
-            "-pthread" => {
-                println!("cargo:rustc-link-arg=-pthread");
-            }
-            token if token.starts_with("-L") && token.len() > 2 => {
-                println!("cargo:rustc-link-search=native={}", &token[2..]);
-            }
-            token if token.starts_with("-l") && token.len() > 2 => {
-                let lib = &token[2..];
-
-                if target_os == "macos" && lib == "stdc++" {
-                    i += 1;
-                    continue;
-                }
-
+            LinkDirective::Lib(lib) => {
                 println!("cargo:rustc-link-lib={lib}");
             }
-            token => {
-                println!("cargo:rustc-link-arg={token}");
+            LinkDirective::Framework(name) => {
+                println!("cargo:rustc-link-lib=framework={name}");
+            }
+            LinkDirective::Arg(arg) => {
+                println!("cargo:rustc-link-arg={arg}");
             }
         }
-
-        i += 1;
     }
-}
-
-fn split_shell_words(value: &str) -> Vec<String> {
-    let mut words = Vec::new();
-    let mut current = String::new();
-    let mut quote = None;
-
-    for ch in value.chars() {
-        match (quote, ch) {
-            (Some(active), ch) if ch == active => {
-                quote = None;
-            }
-            (Some(_), ch) => current.push(ch),
-            (None, '\'' | '"') => {
-                quote = Some(ch);
-            }
-            (None, ch) if ch.is_whitespace() => {
-                if !current.is_empty() {
-                    words.push(std::mem::take(&mut current));
-                }
-            }
-            (None, ch) => current.push(ch),
-        }
-    }
-
-    if !current.is_empty() {
-        words.push(current);
-    }
-
-    words
 }
 
 fn link_php_dependencies(lib_dir: &Path) {
-    let xml_libs = ["xml2"];
-    let network_libs = ["curl"];
-    let text_libs = ["onig", "gmp"];
-    let ssl_libs = ["crypto", "ssl"];
-    let archive_libs = ["bz2", "zip"];
-    let image_libs = ["png16", "png"];
-    let terminal_libs = ["ncurses", "edit"];
-    let core_libs = ["charset", "iconv", "z"];
-    let db_libs = ["sqlite3", "pgcommon", "pgport", "pq"];
-    let icu_libs = ["icudata", "icuuc", "icuio", "icutu", "icui18n"];
-    let extension_libs = [
-        "brotli",
-        "brotlicommon",
-        "brotlidec",
-        "brotlienc",
-        "cares",
-        "ffi",
-        "lzma",
-        "nghttp2",
-        "sodium",
-        "yaml",
-        "zstd",
-    ];
-
-    for lib in core_libs
-        .iter()
-        .chain(ssl_libs.iter())
-        .chain(network_libs.iter())
-        .chain(xml_libs.iter())
-        .chain(archive_libs.iter())
-        .chain(db_libs.iter())
-        .chain(image_libs.iter())
-        .chain(text_libs.iter())
-        .chain(terminal_libs.iter())
-        .chain(icu_libs.iter())
-        .chain(extension_libs.iter())
-    {
-        let lib_file = format!("lib{}.a", lib);
-        if lib_dir
-            .join(&lib_file)
-            .exists()
-        {
-            println!("cargo:rustc-link-lib=static={}", lib);
-        }
+    for lib in static_dependency_libraries(lib_dir) {
+        println!("cargo:rustc-link-lib=static={lib}");
     }
 }
 
