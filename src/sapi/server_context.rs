@@ -499,6 +499,19 @@ impl ServerContext {
         self.response.abort_reason()
     }
 
+    pub(crate) fn report_abort_reason(&self) -> Option<AbortReason> {
+        self.abort_reason()
+            .or_else(|| self.control.abort_reason())
+    }
+
+    pub(crate) fn report_aborted(&self) -> bool {
+        self.aborted()
+            || self
+                .control
+                .abort_reason()
+                .is_some()
+    }
+
     pub(crate) fn client_closed(&self) -> bool {
         self.response.client_closed()
             || self
@@ -572,9 +585,9 @@ impl ServerContext {
             exit_status,
             php_success,
             finalized_early: self.finalized_early(),
-            aborted: self.aborted(),
+            aborted: self.report_aborted(),
             client_closed: self.client_closed(),
-            abort_reason: self.abort_reason(),
+            abort_reason: self.report_abort_reason(),
             messages: self.messages,
         })
     }

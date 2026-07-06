@@ -189,7 +189,41 @@ impl ResponseSink for RecordingSink {
 struct CancellingSink {
     events: Arc<std::sync::Mutex<Vec<SinkEvent>>>,
     control: Arc<ExecutionControl>,
+    cancel_on_finish: bool,
     finished: bool,
+}
+
+struct DeadliningSink {
+    events: Arc<std::sync::Mutex<Vec<SinkEvent>>>,
+    control: Arc<ExecutionControl>,
+    finished: bool,
+}
+
+impl DeadliningSink {
+    fn new(
+        events: Arc<std::sync::Mutex<Vec<SinkEvent>>>,
+        control: Arc<ExecutionControl>,
+    ) -> Self {
+        Self {
+            events,
+            control,
+            finished: false,
+        }
+    }
+}
+
+struct ClosingCancellingSink {
+    events: Arc<std::sync::Mutex<Vec<SinkEvent>>>,
+    control: Arc<ExecutionControl>,
+}
+
+impl ClosingCancellingSink {
+    fn new(
+        events: Arc<std::sync::Mutex<Vec<SinkEvent>>>,
+        control: Arc<ExecutionControl>,
+    ) -> Self {
+        Self { events, control }
+    }
 }
 
 impl CancellingSink {
@@ -200,6 +234,19 @@ impl CancellingSink {
         Self {
             events,
             control,
+            cancel_on_finish: false,
+            finished: false,
+        }
+    }
+
+    fn on_finish(
+        events: Arc<std::sync::Mutex<Vec<SinkEvent>>>,
+        control: Arc<ExecutionControl>,
+    ) -> Self {
+        Self {
+            events,
+            control,
+            cancel_on_finish: true,
             finished: false,
         }
     }
@@ -233,7 +280,10 @@ impl ResponseSink for CancellingSink {
             .push(SinkEvent::Write(
                 String::from_utf8_lossy(bytes).into_owned(),
             ));
-        self.control.cancel();
+
+        if !self.cancel_on_finish {
+            self.control.cancel();
+        }
 
         SinkResult::Continue
     }
@@ -249,6 +299,9 @@ impl ResponseSink for CancellingSink {
 
     fn finish(&mut self) -> SinkResult {
         self.finished = true;
+        if self.cancel_on_finish {
+            self.control.cancel();
+        }
         self.events
             .lock()
             .unwrap()
@@ -268,6 +321,138 @@ impl ResponseSink for CancellingSink {
 
     fn is_finished(&self) -> bool {
         self.finished
+    }
+}
+
+impl ResponseSink for DeadliningSink {
+    fn send_headers(
+        &mut self,
+        status: u16,
+        headers: &[ResponseHeader],
+    ) -> SinkResult {
+        let headers = headers
+            .iter()
+            .map(|header| {
+                (header.name().to_string(), header.value().to_string())
+            })
+            .collect();
+
+        self.events
+            .lock()
+            .unwrap()
+            .push(SinkEvent::Headers(status, headers));
+
+        SinkResult::Continue
+    }
+
+    fn write(&mut self, bytes: &[u8]) -> SinkResult {
+        self.events
+            .lock()
+            .unwrap()
+            .push(SinkEvent::Write(
+                String::from_utf8_lossy(bytes).into_owned(),
+            ));
+
+        SinkResult::Continue
+    }
+
+    fn flush(&mut self) -> SinkResult {
+        self.events
+            .lock()
+            .unwrap()
+            .push(SinkEvent::Flush);
+
+        SinkResult::Continue
+    }
+
+    fn finish(&mut self) -> SinkResult {
+        self.finished = true;
+        self.control
+            .set_deadline(Instant::now() - Duration::from_secs(1));
+        self.events
+            .lock()
+            .unwrap()
+            .push(SinkEvent::Finish {
+                marker_exists: None,
+            });
+
+        SinkResult::Continue
+    }
+
+    fn abort(&mut self, reason: AbortReason) {
+        self.events
+            .lock()
+            .unwrap()
+            .push(SinkEvent::Abort(reason));
+    }
+
+    fn is_finished(&self) -> bool {
+        self.finished
+    }
+}
+
+impl ResponseSink for ClosingCancellingSink {
+    fn send_headers(
+        &mut self,
+        status: u16,
+        headers: &[ResponseHeader],
+    ) -> SinkResult {
+        let headers = headers
+            .iter()
+            .map(|header| {
+                (header.name().to_string(), header.value().to_string())
+            })
+            .collect();
+
+        self.events
+            .lock()
+            .unwrap()
+            .push(SinkEvent::Headers(status, headers));
+
+        SinkResult::Continue
+    }
+
+    fn write(&mut self, bytes: &[u8]) -> SinkResult {
+        self.events
+            .lock()
+            .unwrap()
+            .push(SinkEvent::Write(
+                String::from_utf8_lossy(bytes).into_owned(),
+            ));
+        self.control.cancel();
+
+        SinkResult::Closed
+    }
+
+    fn flush(&mut self) -> SinkResult {
+        self.events
+            .lock()
+            .unwrap()
+            .push(SinkEvent::Flush);
+
+        SinkResult::Continue
+    }
+
+    fn finish(&mut self) -> SinkResult {
+        self.events
+            .lock()
+            .unwrap()
+            .push(SinkEvent::Finish {
+                marker_exists: None,
+            });
+
+        SinkResult::Continue
+    }
+
+    fn abort(&mut self, reason: AbortReason) {
+        self.events
+            .lock()
+            .unwrap()
+            .push(SinkEvent::Abort(reason));
+    }
+
+    fn is_finished(&self) -> bool {
+        false
     }
 }
 
@@ -954,6 +1139,154 @@ fn cancel_or_deadline_does_not_skip_request_shutdown() {
     );
 
     let _ = std::fs::remove_file(marker_path);
+}
+
+#[test]
+fn post_finish_host_cancel_reports_abort_reason() {
+    let php = RiphtSapi::instance();
+    let script_path = php_script_path("fastcgi_finish_marker.php");
+    let marker_path = sidecar_path("post-finish-host-cancel");
+    let _ = std::fs::remove_file(&marker_path);
+    let events = Arc::new(std::sync::Mutex::new(Vec::<SinkEvent>::new()));
+    let control = Arc::new(ExecutionControl::new());
+
+    let exec = WebRequest::get()
+        .with_env(
+            "RIPHT_FASTCGI_MARKER_PATH",
+            marker_path
+                .to_string_lossy()
+                .into_owned(),
+        )
+        .build(&script_path)
+        .expect("failed to build WebRequest");
+
+    let report = php
+        .execute_with_sink_and_options(
+            exec,
+            CancellingSink::on_finish(
+                Arc::clone(&events),
+                Arc::clone(&control),
+            ),
+            ExecutionOptions::with_control(Arc::clone(&control)),
+        )
+        .expect("execute_with_sink_and_options() failed");
+
+    assert!(report.php_success);
+    assert!(report.finalized_early);
+    assert!(report.aborted);
+    assert!(!report.client_closed);
+    assert_eq!(report.abort_reason, Some(AbortReason::HostAbort));
+    assert!(control.is_cancelled());
+
+    let marker: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(&marker_path)
+            .expect("fastcgi_finish_marker.php should write marker sidecar"),
+    )
+    .expect("marker sidecar should be valid JSON");
+
+    assert_eq!(marker["finished"], true);
+    assert_eq!(marker["marker"], "after-finish");
+
+    let events = events.lock().unwrap();
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, SinkEvent::Finish { .. })));
+    assert!(!events
+        .iter()
+        .any(|event| matches!(event, SinkEvent::Abort(_))));
+
+    let _ = std::fs::remove_file(marker_path);
+}
+
+#[test]
+fn post_finish_deadline_reports_deadline_reason() {
+    let php = RiphtSapi::instance();
+    let script_path = php_script_path("fastcgi_finish_marker.php");
+    let marker_path = sidecar_path("post-finish-deadline");
+    let _ = std::fs::remove_file(&marker_path);
+    let events = Arc::new(std::sync::Mutex::new(Vec::<SinkEvent>::new()));
+    let control = Arc::new(ExecutionControl::new());
+
+    let exec = WebRequest::get()
+        .with_env(
+            "RIPHT_FASTCGI_MARKER_PATH",
+            marker_path
+                .to_string_lossy()
+                .into_owned(),
+        )
+        .build(&script_path)
+        .expect("failed to build WebRequest");
+
+    let report = php
+        .execute_with_sink_and_options(
+            exec,
+            DeadliningSink::new(Arc::clone(&events), Arc::clone(&control)),
+            ExecutionOptions::with_control(Arc::clone(&control)),
+        )
+        .expect("execute_with_sink_and_options() failed");
+
+    assert!(report.php_success);
+    assert!(report.finalized_early);
+    assert!(report.aborted);
+    assert!(!report.client_closed);
+    assert_eq!(report.abort_reason, Some(AbortReason::DeadlineExceeded));
+    assert!(control.is_deadline_exceeded());
+
+    let marker: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(&marker_path)
+            .expect("fastcgi_finish_marker.php should write marker sidecar"),
+    )
+    .expect("marker sidecar should be valid JSON");
+
+    assert_eq!(marker["finished"], true);
+    assert_eq!(marker["marker"], "after-finish");
+
+    let events = events.lock().unwrap();
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, SinkEvent::Finish { .. })));
+    assert!(!events
+        .iter()
+        .any(|event| matches!(event, SinkEvent::Abort(_))));
+
+    let _ = std::fs::remove_file(marker_path);
+}
+
+#[test]
+fn client_closed_then_host_cancel_preserves_both_states() {
+    let php = RiphtSapi::instance();
+    let script_path = php_script_path("sink_events.php");
+    let events = Arc::new(std::sync::Mutex::new(Vec::<SinkEvent>::new()));
+    let control = Arc::new(ExecutionControl::new());
+
+    let exec = WebRequest::get()
+        .build(&script_path)
+        .expect("failed to build WebRequest");
+
+    let report = php
+        .execute_with_sink_and_options(
+            exec,
+            ClosingCancellingSink::new(
+                Arc::clone(&events),
+                Arc::clone(&control),
+            ),
+            ExecutionOptions::with_control(Arc::clone(&control)),
+        )
+        .expect("execute_with_sink_and_options() failed");
+
+    assert!(report.php_success);
+    assert!(report.client_closed);
+    assert!(report.aborted);
+    assert_eq!(report.abort_reason, Some(AbortReason::HostAbort));
+    assert!(control.is_cancelled());
+
+    let events = events.lock().unwrap();
+    assert!(events
+        .iter()
+        .any(|event| matches!(
+            event,
+            SinkEvent::Abort(AbortReason::ClientClosed)
+        )));
 }
 
 #[test]
