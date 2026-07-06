@@ -1,7 +1,7 @@
 use std::cell::Cell;
 use std::ffi::CString;
 use std::sync::{Arc, OnceLock};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::execution::{
     AbortReason, ExecutionContext, ExecutionControl, ExecutionMessage,
@@ -159,6 +159,7 @@ pub struct ServerContext {
     response: ResponseLifecycle,
     sink: ResponseTarget,
     control: Arc<ExecutionControl>,
+    post_finish_started_at: Option<Instant>,
     pub post_data: Vec<u8>,
     post_position: Cell<usize>,
     pub messages: Vec<ExecutionMessage>,
@@ -206,6 +207,7 @@ impl ServerContext {
             response: ResponseLifecycle::default(),
             sink,
             control: options.into_control(),
+            post_finish_started_at: None,
             messages: Vec::with_capacity(8),
             vars: None,
             env_vars: Vec::new(),
@@ -444,6 +446,10 @@ impl ServerContext {
             return false;
         }
 
+        if finalized_early {
+            self.post_finish_started_at = Some(Instant::now());
+        }
+
         debug_assert!(self.sink.is_finished());
 
         true
@@ -519,6 +525,20 @@ impl ServerContext {
                 .is_client_closed()
     }
 
+    pub(crate) fn timed_out(&self) -> bool {
+        self.control
+            .is_deadline_exceeded()
+    }
+
+    pub(crate) fn post_finish_duration(&self) -> Option<Duration> {
+        if !self.finalized_early() {
+            return None;
+        }
+
+        self.post_finish_started_at
+            .map(|started_at| started_at.elapsed())
+    }
+
     fn stop_delivery_if_controlled(&mut self) -> bool {
         if self
             .control
@@ -587,6 +607,8 @@ impl ServerContext {
             finalized_early: self.finalized_early(),
             aborted: self.report_aborted(),
             client_closed: self.client_closed(),
+            timed_out: self.timed_out(),
+            post_finish_duration: self.post_finish_duration(),
             abort_reason: self.report_abort_reason(),
             messages: self.messages,
         })

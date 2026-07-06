@@ -739,6 +739,9 @@ fn host_sink_observes_headers_body_flush_finish_in_order() {
     assert!(report.php_success);
     assert!(!report.finalized_early);
     assert!(!report.aborted);
+    assert!(!report.client_closed);
+    assert!(!report.timed_out);
+    assert_eq!(report.post_finish_duration, None);
     assert_eq!(report.abort_reason, None);
 
     let events = events.lock().unwrap();
@@ -847,6 +850,10 @@ fn execute_with_sink_reports_early_finish_and_final_output() {
     assert!(report.php_success);
     assert!(report.finalized_early);
     assert!(!report.aborted);
+    assert!(!report.timed_out);
+    assert!(report
+        .post_finish_duration
+        .is_some());
 
     let events = events.lock().unwrap();
     let body = events
@@ -891,6 +898,9 @@ fn host_sink_discards_late_output_and_headers_after_finish() {
         .expect("execute_with_sink() failed");
 
     assert!(report.finalized_early);
+    assert!(report
+        .post_finish_duration
+        .is_some());
 
     let events = events.lock().unwrap();
     let body = events
@@ -935,6 +945,11 @@ fn execute_with_sink_preserves_php_messages() {
 
     assert!(report.php_success);
     assert!(!report.messages.is_empty());
+    assert!(!report.finalized_early);
+    assert!(!report.aborted);
+    assert!(!report.client_closed);
+    assert!(!report.timed_out);
+    assert_eq!(report.post_finish_duration, None);
 }
 
 #[test]
@@ -962,6 +977,8 @@ fn host_sink_closed_write_reports_client_closed_and_aborts_sink() {
     assert!(report.php_success);
     assert!(!report.aborted);
     assert!(report.client_closed);
+    assert!(!report.timed_out);
+    assert_eq!(report.post_finish_duration, None);
     assert_eq!(report.abort_reason, None);
     assert!(control.is_client_closed());
 
@@ -1000,6 +1017,8 @@ fn execute_with_sink_and_options_uses_default_options() {
     assert!(report.php_success);
     assert!(!report.aborted);
     assert!(!report.client_closed);
+    assert!(!report.timed_out);
+    assert_eq!(report.post_finish_duration, None);
     assert_eq!(report.abort_reason, None);
     assert!(events
         .lock()
@@ -1009,10 +1028,10 @@ fn execute_with_sink_and_options_uses_default_options() {
 }
 
 #[test]
-fn host_can_cancel_running_request() {
+fn delivery_callback_can_cancel_request() {
     let php = RiphtSapi::instance();
     let script_path = php_script_path("control_probe.php");
-    let marker_path = sidecar_path("host-can-cancel-running-request");
+    let marker_path = sidecar_path("delivery-callback-can-cancel-request");
     let _ = std::fs::remove_file(&marker_path);
     let events = Arc::new(std::sync::Mutex::new(Vec::<SinkEvent>::new()));
     let control = Arc::new(ExecutionControl::new());
@@ -1038,6 +1057,8 @@ fn host_can_cancel_running_request() {
     assert!(report.php_success);
     assert!(report.aborted);
     assert!(!report.client_closed);
+    assert!(!report.timed_out);
+    assert_eq!(report.post_finish_duration, None);
     assert_eq!(report.abort_reason, Some(AbortReason::HostAbort));
     assert!(control.is_cancelled());
     assert_eq!(
@@ -1086,6 +1107,8 @@ fn deadline_exceeded_sets_deadline_abort_reason() {
     assert!(report.php_success);
     assert!(report.aborted);
     assert!(!report.client_closed);
+    assert!(report.timed_out);
+    assert_eq!(report.post_finish_duration, None);
     assert_eq!(report.abort_reason, Some(AbortReason::DeadlineExceeded));
     assert!(control.is_deadline_exceeded());
 
@@ -1131,6 +1154,9 @@ fn cancel_or_deadline_does_not_skip_request_shutdown() {
 
     assert!(report.php_success);
     assert!(report.aborted);
+    assert!(!report.client_closed);
+    assert!(report.timed_out);
+    assert_eq!(report.post_finish_duration, None);
     assert_eq!(report.abort_reason, Some(AbortReason::DeadlineExceeded));
     assert_eq!(
         std::fs::read_to_string(&marker_path)
@@ -1175,6 +1201,10 @@ fn post_finish_host_cancel_reports_abort_reason() {
     assert!(report.finalized_early);
     assert!(report.aborted);
     assert!(!report.client_closed);
+    assert!(!report.timed_out);
+    assert!(report
+        .post_finish_duration
+        .is_some());
     assert_eq!(report.abort_reason, Some(AbortReason::HostAbort));
     assert!(control.is_cancelled());
 
@@ -1229,6 +1259,10 @@ fn post_finish_deadline_reports_deadline_reason() {
     assert!(report.finalized_early);
     assert!(report.aborted);
     assert!(!report.client_closed);
+    assert!(report.timed_out);
+    assert!(report
+        .post_finish_duration
+        .is_some());
     assert_eq!(report.abort_reason, Some(AbortReason::DeadlineExceeded));
     assert!(control.is_deadline_exceeded());
 
@@ -1277,6 +1311,8 @@ fn client_closed_then_host_cancel_preserves_both_states() {
     assert!(report.php_success);
     assert!(report.client_closed);
     assert!(report.aborted);
+    assert!(!report.timed_out);
+    assert_eq!(report.post_finish_duration, None);
     assert_eq!(report.abort_reason, Some(AbortReason::HostAbort));
     assert!(control.is_cancelled());
 
