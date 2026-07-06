@@ -9,7 +9,7 @@ pub trait RuntimeAdapter {
     fn execute(&mut self, case: &GauntletCase) -> RuntimeResult;
 }
 
-#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeMode {
     RiphtBuffered,
@@ -111,4 +111,12 @@ pub struct SmokeReport {
     pub generated_unix_epoch_secs: u64,
     pub passed: bool,
     pub result: RuntimeResult,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ModesReport {
+    pub generated_unix_epoch_secs: u64,
+    pub passed: bool,
+    pub case: String,
+    pub results: Vec<RuntimeResult>,
 }

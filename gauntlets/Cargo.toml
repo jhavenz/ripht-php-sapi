@@ -12,3 +12,7 @@ serde_json = { workspace = true }
 [[bin]]
 name = "gauntlet-ripht-smoke"
 path = "src/bin/gauntlet-ripht-smoke.rs"
+
+[[bin]]
+name = "gauntlet-ripht-modes"
+path = "src/bin/gauntlet-ripht-modes.rs"
