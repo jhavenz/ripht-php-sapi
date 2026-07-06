@@ -588,10 +588,14 @@ impl ServerContext {
             .map(|(_, v)| v.as_ptr())
     }
 
-    pub fn into_result(self, body: Vec<u8>) -> ExecutionResult {
+    pub fn into_result(
+        self,
+        exit_status: i32,
+        body: Vec<u8>,
+    ) -> ExecutionResult {
         ExecutionResult::new(
             self.status_code.get(),
-            0,
+            exit_status,
             body,
             self.response_headers,
             self.messages,

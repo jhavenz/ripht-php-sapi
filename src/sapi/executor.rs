@@ -113,6 +113,7 @@ impl<'sapi> Executor<'sapi> {
 
             Self::apply_ini_overrides(&*ctx_ptr);
             Self::run_script(&script_cstr);
+            let exit_status = ffi::ripht_php_sapi_exit_status();
 
             ffi::sapi_globals.post_read = 1;
             ffi::php_request_shutdown(std::ptr::null_mut());
@@ -122,7 +123,7 @@ impl<'sapi> Executor<'sapi> {
             Self::cleanup_globals();
             server_ctx.finalize_response();
 
-            Ok((*server_ctx).into_result(Vec::new()))
+            Ok((*server_ctx).into_result(exit_status, Vec::new()))
         }
     }
 

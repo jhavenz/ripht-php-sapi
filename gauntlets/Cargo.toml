@@ -16,3 +16,7 @@ path = "src/bin/gauntlet-ripht-smoke.rs"
 [[bin]]
 name = "gauntlet-ripht-modes"
 path = "src/bin/gauntlet-ripht-modes.rs"
+
+[[bin]]
+name = "gauntlet-lifecycle"
+path = "src/bin/gauntlet-lifecycle.rs"

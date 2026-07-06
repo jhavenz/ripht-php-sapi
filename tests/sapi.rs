@@ -2340,6 +2340,42 @@ fn exit_status_reports_php_exit_code() {
 }
 
 #[test]
+fn streaming_exit_status_reports_php_fatal_error() {
+    let php = RiphtSapi::instance();
+    let script_path = php_script_path("shutdown_behavior.php");
+    let chunks = Arc::new(std::sync::Mutex::new(Vec::<Vec<u8>>::new()));
+    let captured_chunks = Arc::clone(&chunks);
+
+    let exec = WebRequest::get()
+        .with_uri("/shutdown_behavior.php?action=fatal")
+        .build(&script_path)
+        .expect("failed to build fatal streaming WebRequest");
+    let result = php
+        .execute_streaming(exec, move |chunk| {
+            captured_chunks
+                .lock()
+                .unwrap()
+                .push(chunk.to_vec());
+        })
+        .expect("fatal streaming request execution failed");
+
+    assert_eq!(result.status_code(), 200);
+    assert_ne!(result.exit_status(), 0);
+
+    let body: Vec<u8> = chunks
+        .lock()
+        .unwrap()
+        .iter()
+        .flatten()
+        .copied()
+        .collect();
+    let body = String::from_utf8_lossy(&body);
+
+    assert!(body.contains("will_fatal"));
+    assert!(body.contains("Fatal error"));
+}
+
+#[test]
 fn test_streaming_large_output() {
     let php = RiphtSapi::instance();
     let script_path = php_script_path("large_output.php");

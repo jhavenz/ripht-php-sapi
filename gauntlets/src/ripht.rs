@@ -308,12 +308,20 @@ fn build_request(
 ) -> Result<ripht_php_sapi::ExecutionContext, String> {
     let mut request = request_builder(case);
 
+    if let Some(uri) = &case.uri {
+        request = request.with_uri(uri.as_str());
+    }
+
     if let Some(body) = &case.body {
         request = request.with_body(body.clone());
     }
 
     if let Some(content_type) = case.content_type {
         request = request.with_content_type(content_type);
+    }
+
+    for (key, value) in &case.env {
+        request = request.with_env(key.as_str(), value.as_str());
     }
 
     request

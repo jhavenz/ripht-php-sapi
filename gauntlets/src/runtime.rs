@@ -120,3 +120,17 @@ pub struct ModesReport {
     pub case: String,
     pub results: Vec<RuntimeResult>,
 }
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct LifecycleReport {
+    pub generated_unix_epoch_secs: u64,
+    pub passed: bool,
+    pub cases: Vec<LifecycleCaseReport>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct LifecycleCaseReport {
+    pub case: String,
+    pub passed: bool,
+    pub results: Vec<RuntimeResult>,
+}
