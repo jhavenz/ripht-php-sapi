@@ -5,8 +5,8 @@ use std::time::{Duration, Instant};
 
 use crate::execution::{
     AbortReason, ExecutionContext, ExecutionControl, ExecutionMessage,
-    ExecutionOptions, ExecutionReport, ExecutionReportParts, ExecutionResult,
-    ResponseHeader, ResponseSink, SinkResult,
+    ExecutionReport, ExecutionReportParts, ExecutionResult, ResponseHeader,
+    ResponseSink, SinkResult,
 };
 use crate::sapi::response::{BufferedResponseSink, ResponseLifecycle};
 use crate::sapi::ServerVarsCString;
@@ -181,24 +181,27 @@ impl ServerContext {
     pub fn new() -> Self {
         Self::with_response_target(
             ResponseTarget::buffered(buffer_policy().initial_cap),
-            ExecutionOptions::default(),
+            Arc::new(ExecutionControl::default()),
         )
     }
 
     pub(crate) fn with_response_sink(sink: Box<dyn ResponseSink>) -> Self {
-        Self::with_response_sink_and_options(sink, ExecutionOptions::default())
+        Self::with_response_sink_and_options(
+            sink,
+            Arc::new(ExecutionControl::default()),
+        )
     }
 
     pub(crate) fn with_response_sink_and_options(
         sink: Box<dyn ResponseSink>,
-        options: ExecutionOptions,
+        control: Arc<ExecutionControl>,
     ) -> Self {
-        Self::with_response_target(ResponseTarget::host(sink), options)
+        Self::with_response_target(ResponseTarget::host(sink), control)
     }
 
     fn with_response_target(
         sink: ResponseTarget,
-        options: ExecutionOptions,
+        control: Arc<ExecutionControl>,
     ) -> Self {
         Self {
             post_data: Vec::new(),
@@ -206,7 +209,7 @@ impl ServerContext {
             status_code: Cell::new(200),
             response: ResponseLifecycle::default(),
             sink,
-            control: options.into_control(),
+            control,
             post_finish_started_at: None,
             messages: Vec::with_capacity(8),
             vars: None,
@@ -626,10 +629,10 @@ impl ServerContext {
     pub(crate) fn from_context_with_sink_and_options(
         ctx: ExecutionContext,
         sink: Box<dyn ResponseSink>,
-        options: ExecutionOptions,
+        control: Arc<ExecutionControl>,
     ) -> Box<ServerContext> {
         let mut server_ctx = Box::new(
-            ServerContext::with_response_sink_and_options(sink, options),
+            ServerContext::with_response_sink_and_options(sink, control),
         );
         server_ctx.apply_context(ctx);
         server_ctx

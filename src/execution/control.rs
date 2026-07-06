@@ -6,6 +6,7 @@ use super::AbortReason;
 
 #[derive(Debug, Default)]
 pub struct ExecutionControl {
+    claimed: AtomicBool,
     cancelled: AtomicBool,
     client_closed: AtomicBool,
     deadline_exceeded: AtomicBool,
@@ -13,15 +14,17 @@ pub struct ExecutionControl {
 }
 
 impl ExecutionControl {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     pub fn with_deadline(deadline: Instant) -> Self {
         Self {
             deadline: Mutex::new(Some(deadline)),
             ..Self::default()
         }
+    }
+
+    pub(crate) fn claim_for_request(&self) -> bool {
+        self.claimed
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
     }
 
     pub fn cancel(&self) {
@@ -98,10 +101,6 @@ pub struct ExecutionOptions {
 }
 
 impl ExecutionOptions {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     pub fn with_control(control: Arc<ExecutionControl>) -> Self {
         Self {
             deadline: None,
@@ -126,15 +125,73 @@ impl ExecutionOptions {
         self
     }
 
-    pub(crate) fn into_control(self) -> Arc<ExecutionControl> {
+    pub(crate) fn into_control(self) -> Option<Arc<ExecutionControl>> {
         let control = self
             .control
-            .unwrap_or_else(|| Arc::new(ExecutionControl::new()));
+            .unwrap_or_else(|| Arc::new(ExecutionControl::default()));
+
+        if !control.claim_for_request() {
+            return None;
+        }
 
         if let Some(deadline) = self.deadline {
             control.set_deadline(deadline);
         }
 
-        control
+        Some(control)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn options_reject_reused_cancelled_control() {
+        let control = Arc::new(ExecutionControl::default());
+
+        assert!(ExecutionOptions::with_control(Arc::clone(&control))
+            .into_control()
+            .is_some());
+
+        control.cancel();
+
+        assert!(ExecutionOptions::with_control(control)
+            .into_control()
+            .is_none());
+    }
+
+    #[test]
+    fn options_reject_reused_client_closed_control() {
+        let control = Arc::new(ExecutionControl::default());
+
+        assert!(ExecutionOptions::with_control(Arc::clone(&control))
+            .into_control()
+            .is_some());
+
+        control.mark_client_closed();
+
+        assert!(ExecutionOptions::with_control(control)
+            .into_control()
+            .is_none());
+    }
+
+    #[test]
+    fn options_reject_reused_deadline_control() {
+        let control = Arc::new(ExecutionControl::with_deadline(
+            Instant::now() - Duration::from_secs(1),
+        ));
+
+        assert!(ExecutionOptions::with_control(Arc::clone(&control))
+            .into_control()
+            .is_some());
+
+        assert!(control.deadline_exceeded(Instant::now()));
+
+        assert!(ExecutionOptions::with_control(control)
+            .deadline(Instant::now())
+            .into_control()
+            .is_none());
     }
 }

@@ -36,6 +36,9 @@ pub enum ExecutionError {
 
     #[error("Request startup failed")]
     StartupFailed,
+
+    #[error("Execution control has already been used for a request")]
+    ControlAlreadyUsed,
 }
 
 /// Executes PHP scripts within an initialized SAPI.
@@ -166,10 +169,15 @@ impl<'sapi> Executor<'sapi> {
         }
 
         let script_cstr = ctx.path_as_cstring()?;
+
+        let Some(control) = options.into_control() else {
+            return Err(ExecutionError::ControlAlreadyUsed);
+        };
+
         let server_ctx = ServerContext::from_context_with_sink_and_options(
             ctx,
             Box::new(sink),
-            options,
+            control,
         );
 
         // SAFETY: Same ownership transfer pattern as execute_with_hooks.

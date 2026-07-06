@@ -3,9 +3,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use ripht_php_sapi::{
-    AbortReason, ExecutionContext, ExecutionControl, ExecutionHooks,
-    ExecutionOptions, OutputAction, ResponseHeader, ResponseSink, RiphtSapi,
-    SinkResult, WebRequest,
+    AbortReason, ExecutionContext, ExecutionControl, ExecutionError,
+    ExecutionHooks, ExecutionOptions, OutputAction, ResponseHeader,
+    ResponseSink, RiphtSapi, SinkResult, WebRequest,
 };
 
 fn php_script_path(name: &str) -> PathBuf {
@@ -957,7 +957,7 @@ fn host_sink_closed_write_reports_client_closed_and_aborts_sink() {
     let php = RiphtSapi::instance();
     let script_path = php_script_path("sink_events.php");
     let events = Arc::new(std::sync::Mutex::new(Vec::<SinkEvent>::new()));
-    let control = Arc::new(ExecutionControl::new());
+    let control = Arc::new(ExecutionControl::default());
 
     let exec = WebRequest::get()
         .build(&script_path)
@@ -1028,13 +1028,99 @@ fn execute_with_sink_and_options_uses_default_options() {
 }
 
 #[test]
+fn reused_execution_control_returns_error_before_sink_delivery() {
+    let php = RiphtSapi::instance();
+    let script_path = php_script_path("sink_events.php");
+    let first_events = Arc::new(std::sync::Mutex::new(Vec::<SinkEvent>::new()));
+    let second_events =
+        Arc::new(std::sync::Mutex::new(Vec::<SinkEvent>::new()));
+    let control = Arc::new(ExecutionControl::default());
+
+    let first_exec = WebRequest::get()
+        .build(&script_path)
+        .expect("failed to build first WebRequest");
+
+    let first_report = php
+        .execute_with_sink_and_options(
+            first_exec,
+            RecordingSink::new(Arc::clone(&first_events)),
+            ExecutionOptions::with_control(Arc::clone(&control)),
+        )
+        .expect("first execute_with_sink_and_options() failed");
+
+    assert!(first_report.php_success);
+
+    let second_exec = WebRequest::get()
+        .build(&script_path)
+        .expect("failed to build second WebRequest");
+
+    let error = php
+        .execute_with_sink_and_options(
+            second_exec,
+            RecordingSink::new(Arc::clone(&second_events)),
+            ExecutionOptions::with_control(Arc::clone(&control)),
+        )
+        .expect_err("reused ExecutionControl should fail");
+
+    assert!(matches!(error, ExecutionError::ControlAlreadyUsed));
+    assert!(second_events
+        .lock()
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn script_not_found_does_not_consume_execution_control() {
+    let php = RiphtSapi::instance();
+    let script_path = php_script_path("sink_events.php");
+    let missing_path = php_script_path("missing-control-preflight.php");
+    let missing_events =
+        Arc::new(std::sync::Mutex::new(Vec::<SinkEvent>::new()));
+    let valid_events = Arc::new(std::sync::Mutex::new(Vec::<SinkEvent>::new()));
+    let control = Arc::new(ExecutionControl::default());
+
+    let missing_error = php
+        .execute_with_sink_and_options(
+            ExecutionContext::script(&missing_path),
+            RecordingSink::new(Arc::clone(&missing_events)),
+            ExecutionOptions::with_control(Arc::clone(&control)),
+        )
+        .expect_err("missing script should fail before claiming control");
+
+    assert!(matches!(missing_error, ExecutionError::ScriptNotFound(_)));
+    assert!(missing_events
+        .lock()
+        .unwrap()
+        .is_empty());
+
+    let valid_exec = WebRequest::get()
+        .build(&script_path)
+        .expect("failed to build valid WebRequest");
+
+    let report = php
+        .execute_with_sink_and_options(
+            valid_exec,
+            RecordingSink::new(Arc::clone(&valid_events)),
+            ExecutionOptions::with_control(control),
+        )
+        .expect("valid request should still be able to use control");
+
+    assert!(report.php_success);
+    assert!(valid_events
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|event| matches!(event, SinkEvent::Finish { .. })));
+}
+
+#[test]
 fn delivery_callback_can_cancel_request() {
     let php = RiphtSapi::instance();
     let script_path = php_script_path("control_probe.php");
     let marker_path = sidecar_path("delivery-callback-can-cancel-request");
     let _ = std::fs::remove_file(&marker_path);
     let events = Arc::new(std::sync::Mutex::new(Vec::<SinkEvent>::new()));
-    let control = Arc::new(ExecutionControl::new());
+    let control = Arc::new(ExecutionControl::default());
 
     let exec = WebRequest::get()
         .with_env(
@@ -1089,7 +1175,7 @@ fn deadline_exceeded_sets_deadline_abort_reason() {
     let php = RiphtSapi::instance();
     let script_path = php_script_path("sink_events.php");
     let events = Arc::new(std::sync::Mutex::new(Vec::<SinkEvent>::new()));
-    let control = Arc::new(ExecutionControl::new());
+    let control = Arc::new(ExecutionControl::default());
 
     let exec = WebRequest::get()
         .build(&script_path)
@@ -1174,7 +1260,7 @@ fn post_finish_host_cancel_reports_abort_reason() {
     let marker_path = sidecar_path("post-finish-host-cancel");
     let _ = std::fs::remove_file(&marker_path);
     let events = Arc::new(std::sync::Mutex::new(Vec::<SinkEvent>::new()));
-    let control = Arc::new(ExecutionControl::new());
+    let control = Arc::new(ExecutionControl::default());
 
     let exec = WebRequest::get()
         .with_env(
@@ -1235,7 +1321,7 @@ fn post_finish_deadline_reports_deadline_reason() {
     let marker_path = sidecar_path("post-finish-deadline");
     let _ = std::fs::remove_file(&marker_path);
     let events = Arc::new(std::sync::Mutex::new(Vec::<SinkEvent>::new()));
-    let control = Arc::new(ExecutionControl::new());
+    let control = Arc::new(ExecutionControl::default());
 
     let exec = WebRequest::get()
         .with_env(
@@ -1291,7 +1377,7 @@ fn client_closed_then_host_cancel_preserves_both_states() {
     let php = RiphtSapi::instance();
     let script_path = php_script_path("sink_events.php");
     let events = Arc::new(std::sync::Mutex::new(Vec::<SinkEvent>::new()));
-    let control = Arc::new(ExecutionControl::new());
+    let control = Arc::new(ExecutionControl::default());
 
     let exec = WebRequest::get()
         .build(&script_path)
