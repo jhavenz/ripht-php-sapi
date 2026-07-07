@@ -18,6 +18,7 @@ pub enum RuntimeMode {
     RiphtSink,
     RiphtSinkWithOptions,
     PhpFpm,
+    FrankenPhp,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -160,6 +161,19 @@ pub struct FpmParityReport {
     pub fpm_binary: Option<String>,
     pub ripht: RuntimeResult,
     pub php_fpm: Option<RuntimeResult>,
+    pub comparison: ParityComparison,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FrankenPhpParityReport {
+    pub generated_unix_epoch_secs: u64,
+    pub passed: bool,
+    pub skipped: bool,
+    pub skip_reason: Option<String>,
+    pub case: String,
+    pub frankenphp_binary: Option<String>,
+    pub ripht: RuntimeResult,
+    pub frankenphp: Option<RuntimeResult>,
     pub comparison: ParityComparison,
 }
 

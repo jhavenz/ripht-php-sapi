@@ -28,3 +28,7 @@ path = "src/bin/gauntlet-resiliency.rs"
 [[bin]]
 name = "gauntlet-fpm-parity"
 path = "src/bin/gauntlet-fpm-parity.rs"
+
+[[bin]]
+name = "gauntlet-frankenphp-parity"
+path = "src/bin/gauntlet-frankenphp-parity.rs"
