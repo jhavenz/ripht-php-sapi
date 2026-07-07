@@ -525,6 +525,7 @@ extern "C" {
     );
     pub fn php_execute_script(primary_file: *mut zend_file_handle) -> c_int;
     pub fn ripht_php_sapi_exit_status() -> c_int;
+    pub fn ripht_php_sapi_reset_exit_status();
     pub fn ripht_sapi_error_shim(
         error_type: c_int,
         error_msg: *const c_char,

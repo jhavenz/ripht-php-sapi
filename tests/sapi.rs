@@ -2376,6 +2376,43 @@ fn streaming_exit_status_reports_php_fatal_error() {
 }
 
 #[test]
+fn zz_execute_with_sink_reports_php_failure_for_fatal_error() {
+    let php = RiphtSapi::instance();
+    let script_path = php_script_path("shutdown_behavior.php");
+    let events = Arc::new(std::sync::Mutex::new(Vec::<SinkEvent>::new()));
+
+    let exec = WebRequest::get()
+        .with_uri("/shutdown_behavior.php?action=fatal")
+        .build(&script_path)
+        .expect("failed to build fatal sink WebRequest");
+    let report = php
+        .execute_with_sink(exec, RecordingSink::new(Arc::clone(&events)))
+        .expect("fatal sink request execution failed");
+
+    assert_eq!(report.status_code, 200);
+    assert_ne!(report.exit_status, 0);
+    assert!(!report.php_success);
+    assert!(!report.aborted);
+    assert!(!report.client_closed);
+    assert!(!report.timed_out);
+    assert_eq!(report.abort_reason, None);
+    assert!(!report.messages.is_empty());
+
+    let body = events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|event| match event {
+            SinkEvent::Write(bytes) => Some(bytes.as_str()),
+            _ => None,
+        })
+        .collect::<String>();
+
+    assert!(body.contains("will_fatal"));
+    assert!(body.contains("Fatal error"));
+}
+
+#[test]
 fn test_streaming_large_output() {
     let php = RiphtSapi::instance();
     let script_path = php_script_path("large_output.php");

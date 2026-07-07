@@ -548,6 +548,7 @@ fn assert_fatal_error(
             "expected fatal error to be captured as a PHP message".to_string(),
         );
     }
+    require_fatal_sink_report(result, &mut failures);
 
     require_body_contains(result, b"will_fatal", &mut failures);
     require_body_contains(result, b"Fatal error", &mut failures);
@@ -738,6 +739,30 @@ fn clean_sink_report(report: &ReportMetadata, finalized_early: bool) -> bool {
             || report
                 .post_finish_duration_ms
                 .is_some())
+}
+
+fn require_fatal_sink_report(
+    result: &RuntimeResult,
+    failures: &mut Vec<String>,
+) {
+    if !is_sink_mode(result.mode) {
+        return;
+    }
+
+    let Some(report) = &result.report else {
+        failures.push("expected fatal sink execution report".to_string());
+        return;
+    };
+
+    if report.php_success {
+        failures
+            .push("expected fatal sink report to mark PHP failure".to_string());
+    }
+    if report.exit_status == 0 {
+        failures.push(
+            "expected fatal sink report exit status to be nonzero".to_string(),
+        );
+    }
 }
 
 fn require_sink_event_order(

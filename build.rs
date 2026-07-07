@@ -216,6 +216,10 @@ int ripht_php_sapi_exit_status(void) {
     return EG(exit_status);
 }
 
+void ripht_php_sapi_reset_exit_status(void) {
+    EG(exit_status) = 0;
+}
+
 void ripht_sapi_error_shim(int type, const char *error_msg, ...) {
     (void) type;
     (void) error_msg;

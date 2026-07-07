@@ -112,6 +112,7 @@ impl<'sapi> Executor<'sapi> {
             }
 
             Self::apply_ini_overrides(&*ctx_ptr);
+            ffi::ripht_php_sapi_reset_exit_status();
             Self::run_script(&script_cstr);
             let exit_status = ffi::ripht_php_sapi_exit_status();
 
@@ -203,13 +204,14 @@ impl<'sapi> Executor<'sapi> {
             }
 
             Self::apply_ini_overrides(&*ctx_ptr);
+            ffi::ripht_php_sapi_reset_exit_status();
 
             #[cfg(feature = "tracing")]
             trace!("Executing script");
 
             let exec_result = Self::run_script(&script_cstr);
             let exit_status = ffi::ripht_php_sapi_exit_status();
-            let success = exec_result != ffi::FAILURE;
+            let success = exec_result != ffi::FAILURE && exit_status == 0;
             (*ctx_ptr).observe_control_state();
 
             #[cfg(feature = "tracing")]
@@ -293,6 +295,7 @@ impl<'sapi> Executor<'sapi> {
             }
 
             Self::apply_ini_overrides(&*ctx_ptr);
+            ffi::ripht_php_sapi_reset_exit_status();
 
             hooks
                 .borrow_mut()
