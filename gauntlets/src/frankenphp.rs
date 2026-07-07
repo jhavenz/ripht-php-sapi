@@ -8,10 +8,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::{
     artifact_path, artifact_report_path, case::scripts_dir,
-    write_json_artifact, FrankenPhpParityReport, GauntletCase, HeaderValue,
-    HttpMethod, ParityComparison, RiphtBufferedAdapter, RuntimeAdapter,
-    RuntimeFailure, RuntimeFailureKind, RuntimeMessage, RuntimeMode,
-    RuntimeResult,
+    compare_runtime_parity, write_json_artifact, FrankenPhpParityReport,
+    GauntletCase, HeaderValue, HttpMethod, ParityComparison,
+    RiphtBufferedAdapter, RuntimeAdapter, RuntimeFailure, RuntimeFailureKind,
+    RuntimeMessage, RuntimeMode, RuntimeResult,
 };
 
 pub const RIPHT_FRANKENPHP_PARITY_ARTIFACT: &str =
@@ -55,16 +55,29 @@ fn build_frankenphp_parity_report(
         Ok(adapter) => adapter,
         Err(err) => {
             let reason = err.to_string();
+            let skipped = err.is_skip();
+            let frankenphp = (!skipped).then(|| {
+                RuntimeResult::failure(
+                    "frankenphp",
+                    RuntimeMode::FrankenPhp,
+                    case.name,
+                    Duration::ZERO,
+                    RuntimeFailure::new(
+                        RuntimeFailureKind::Execute,
+                        reason.clone(),
+                    ),
+                )
+            });
 
             return FrankenPhpParityReport {
                 generated_unix_epoch_secs,
                 passed: false,
-                skipped: true,
-                skip_reason: Some(reason.clone()),
+                skipped,
+                skip_reason: skipped.then(|| reason.clone()),
                 case: case.name.to_string(),
                 frankenphp_binary: None,
                 ripht: ripht_result,
-                frankenphp: None,
+                frankenphp,
                 comparison: ParityComparison {
                     passed: false,
                     differences: vec![reason],
@@ -79,7 +92,13 @@ fn build_frankenphp_parity_report(
             .to_string(),
     );
     let frankenphp_result = frankenphp.execute(&case);
-    let comparison = compare_parity(&ripht_result, &frankenphp_result);
+    let comparison = compare_runtime_parity(
+        "ripht",
+        "frankenphp",
+        &ripht_result,
+        &frankenphp_result,
+    )
+    .parity_comparison();
     let passed = comparison.passed;
 
     FrankenPhpParityReport {
@@ -279,6 +298,12 @@ impl std::fmt::Display for FrankenPhpStartError {
                 write!(f, "timed out waiting for FrankenPHP server; {log}")
             }
         }
+    }
+}
+
+impl FrankenPhpStartError {
+    fn is_skip(&self) -> bool {
+        matches!(self, Self::MissingBinary | Self::InvalidEnvPath(_))
     }
 }
 
@@ -573,61 +598,6 @@ fn decode_chunked_body(bytes: &[u8]) -> Result<Vec<u8>, String> {
     }
 }
 
-fn compare_parity(
-    ripht: &RuntimeResult,
-    frankenphp: &RuntimeResult,
-) -> ParityComparison {
-    let mut differences = Vec::new();
-
-    if let Some(failure) = &ripht.failure {
-        differences.push(format!("ripht failed: {}", failure.message));
-    }
-    if let Some(failure) = &frankenphp.failure {
-        differences.push(format!("frankenphp failed: {}", failure.message));
-    }
-    if ripht.status_code != frankenphp.status_code {
-        differences.push(format!(
-            "status mismatch: ripht={:?} frankenphp={:?}",
-            ripht.status_code, frankenphp.status_code
-        ));
-    }
-    if ripht.body != frankenphp.body {
-        differences.push(format!(
-            "body mismatch: ripht=`{}` frankenphp=`{}`",
-            String::from_utf8_lossy(&ripht.body),
-            String::from_utf8_lossy(&frankenphp.body)
-        ));
-    }
-    if !contains_exact_header(&ripht.headers, "X-Ripht-Sink", "yes") {
-        differences.push("ripht missing X-Ripht-Sink: yes".to_string());
-    }
-    if !contains_exact_header(&frankenphp.headers, "X-Ripht-Sink", "yes") {
-        differences.push("frankenphp missing X-Ripht-Sink: yes".to_string());
-    }
-    if !frankenphp.messages.is_empty() {
-        differences
-            .push("frankenphp emitted HTTP/runtime messages".to_string());
-    }
-
-    ParityComparison {
-        passed: differences.is_empty(),
-        differences,
-    }
-}
-
-fn contains_exact_header(
-    headers: &[HeaderValue],
-    expected_name: &str,
-    expected_value: &str,
-) -> bool {
-    headers.iter().any(|header| {
-        header
-            .name
-            .eq_ignore_ascii_case(expected_name)
-            && header.value == expected_value
-    })
-}
-
 fn now_unix_epoch_secs() -> std::io::Result<u64> {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -638,10 +608,12 @@ fn now_unix_epoch_secs() -> std::io::Result<u64> {
 #[cfg(test)]
 mod tests {
     use super::{
-        compare_parity, decode_chunked_body, parse_http_response,
-        truncate_to_content_length,
+        decode_chunked_body, parse_http_response, truncate_to_content_length,
+        FrankenPhpStartError,
     };
-    use crate::{HeaderValue, RuntimeMode, RuntimeResult};
+    use crate::{
+        compare_runtime_parity, HeaderValue, RuntimeMode, RuntimeResult,
+    };
 
     #[test]
     fn http_response_parser_preserves_status_headers_and_body() {
@@ -700,7 +672,19 @@ mod tests {
             vec![HeaderValue::new("X-Ripht-Sink", "yes")],
         );
 
-        assert!(compare_parity(&ripht, &frankenphp).passed);
+        assert!(
+            compare_runtime_parity("ripht", "frankenphp", &ripht, &frankenphp)
+                .passed
+        );
+    }
+
+    #[test]
+    fn frankenphp_start_skip_is_limited_to_missing_binary_cases() {
+        assert!(FrankenPhpStartError::MissingBinary.is_skip());
+        assert!(FrankenPhpStartError::InvalidEnvPath("missing".to_string())
+            .is_skip());
+        assert!(!FrankenPhpStartError::Spawn("boom".to_string()).is_skip());
+        assert!(!FrankenPhpStartError::Timeout("log".to_string()).is_skip());
     }
 
     fn runtime_result(

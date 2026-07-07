@@ -8,10 +8,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::{
     artifact_path, artifact_report_path, case::scripts_dir,
-    write_json_artifact, FpmParityReport, GauntletCase, HeaderValue,
-    HttpMethod, ParityComparison, RiphtBufferedAdapter, RuntimeAdapter,
-    RuntimeFailure, RuntimeFailureKind, RuntimeMessage, RuntimeMode,
-    RuntimeResult,
+    compare_runtime_parity, write_json_artifact, FpmParityReport, GauntletCase,
+    HeaderValue, HttpMethod, ParityComparison, RiphtBufferedAdapter,
+    RuntimeAdapter, RuntimeFailure, RuntimeFailureKind, RuntimeMessage,
+    RuntimeMode, RuntimeResult,
 };
 
 pub const RIPHT_FPM_PARITY_ARTIFACT: &str = "ripht-fpm-parity.json";
@@ -51,16 +51,29 @@ fn build_fpm_parity_report(generated_unix_epoch_secs: u64) -> FpmParityReport {
         Ok(adapter) => adapter,
         Err(err) => {
             let reason = err.to_string();
+            let skipped = err.is_skip();
+            let php_fpm = (!skipped).then(|| {
+                RuntimeResult::failure(
+                    "php_fpm",
+                    RuntimeMode::PhpFpm,
+                    case.name,
+                    Duration::ZERO,
+                    RuntimeFailure::new(
+                        RuntimeFailureKind::Execute,
+                        reason.clone(),
+                    ),
+                )
+            });
 
             return FpmParityReport {
                 generated_unix_epoch_secs,
                 passed: false,
-                skipped: true,
-                skip_reason: Some(reason.clone()),
+                skipped,
+                skip_reason: skipped.then(|| reason.clone()),
                 case: case.name.to_string(),
                 fpm_binary: None,
                 ripht: ripht_result,
-                php_fpm: None,
+                php_fpm,
                 comparison: ParityComparison {
                     passed: false,
                     differences: vec![reason],
@@ -71,7 +84,9 @@ fn build_fpm_parity_report(generated_unix_epoch_secs: u64) -> FpmParityReport {
 
     let fpm_binary = Some(fpm.binary_label().to_string());
     let fpm_result = fpm.execute(&case);
-    let comparison = compare_parity(&ripht_result, &fpm_result);
+    let comparison =
+        compare_runtime_parity("ripht", "php_fpm", &ripht_result, &fpm_result)
+            .parity_comparison();
     let passed = comparison.passed;
 
     FpmParityReport {
@@ -290,6 +305,12 @@ impl std::fmt::Display for FpmStartError {
                 write!(f, "timed out waiting for php-fpm socket; {log}")
             }
         }
+    }
+}
+
+impl FpmStartError {
+    fn is_skip(&self) -> bool {
+        matches!(self, Self::MissingBinary | Self::InvalidEnvPath(_))
     }
 }
 
@@ -685,60 +706,6 @@ fn header_delimiter(bytes: &[u8]) -> Option<(usize, usize)> {
         })
 }
 
-fn compare_parity(
-    ripht: &RuntimeResult,
-    fpm: &RuntimeResult,
-) -> ParityComparison {
-    let mut differences = Vec::new();
-
-    if let Some(failure) = &ripht.failure {
-        differences.push(format!("ripht failed: {}", failure.message));
-    }
-    if let Some(failure) = &fpm.failure {
-        differences.push(format!("php-fpm failed: {}", failure.message));
-    }
-    if ripht.status_code != fpm.status_code {
-        differences.push(format!(
-            "status mismatch: ripht={:?} php_fpm={:?}",
-            ripht.status_code, fpm.status_code
-        ));
-    }
-    if ripht.body != fpm.body {
-        differences.push(format!(
-            "body mismatch: ripht=`{}` php_fpm=`{}`",
-            String::from_utf8_lossy(&ripht.body),
-            String::from_utf8_lossy(&fpm.body)
-        ));
-    }
-    if !contains_header(&ripht.headers, "X-Ripht-Sink", "yes") {
-        differences.push("ripht missing X-Ripht-Sink: yes".to_string());
-    }
-    if !contains_header(&fpm.headers, "X-Ripht-Sink", "yes") {
-        differences.push("php-fpm missing X-Ripht-Sink: yes".to_string());
-    }
-    if !fpm.messages.is_empty() {
-        differences.push("php-fpm emitted FastCGI stderr".to_string());
-    }
-
-    ParityComparison {
-        passed: differences.is_empty(),
-        differences,
-    }
-}
-
-fn contains_header(
-    headers: &[HeaderValue],
-    expected_name: &str,
-    expected_value: &str,
-) -> bool {
-    headers.iter().any(|header| {
-        header
-            .name
-            .eq_ignore_ascii_case(expected_name)
-            && header.value == expected_value
-    })
-}
-
 fn now_unix_epoch_secs() -> std::io::Result<u64> {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -749,9 +716,11 @@ fn now_unix_epoch_secs() -> std::io::Result<u64> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_fcgi_params, compare_parity, parse_cgi_response, FcgiOutput,
+        build_fcgi_params, parse_cgi_response, FcgiOutput, FpmStartError,
     };
-    use crate::{HeaderValue, RuntimeMode, RuntimeResult};
+    use crate::{
+        compare_runtime_parity, HeaderValue, RuntimeMode, RuntimeResult,
+    };
 
     #[test]
     fn cgi_response_parser_preserves_status_headers_and_body() {
@@ -814,7 +783,17 @@ mod tests {
             vec![HeaderValue::new("X-Ripht-Sink", "yes")],
         );
 
-        assert!(compare_parity(&ripht, &fpm).passed);
+        assert!(
+            compare_runtime_parity("ripht", "php_fpm", &ripht, &fpm).passed
+        );
+    }
+
+    #[test]
+    fn fpm_start_skip_is_limited_to_missing_binary_cases() {
+        assert!(FpmStartError::MissingBinary.is_skip());
+        assert!(FpmStartError::InvalidEnvPath("missing".to_string()).is_skip());
+        assert!(!FpmStartError::Spawn("boom".to_string()).is_skip());
+        assert!(!FpmStartError::Timeout("log".to_string()).is_skip());
     }
 
     fn runtime_result(

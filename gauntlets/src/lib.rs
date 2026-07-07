@@ -5,6 +5,7 @@ mod fpm;
 mod frankenphp;
 mod lifecycle;
 mod modes;
+mod report;
 mod resiliency;
 mod ripht;
 mod runtime;
@@ -27,6 +28,12 @@ pub use lifecycle::{
     run_ripht_lifecycle, LifecycleRun, RIPHT_LIFECYCLE_ARTIFACT,
 };
 pub use modes::{run_ripht_modes, ModesRun, RIPHT_MODES_ARTIFACT};
+pub use report::{
+    compare_runtime_parity, report_policy, run_gauntlet_report,
+    ExpectedComparison, GauntletReport, HeaderExpectation, ReportCase,
+    ReportDiff, ReportPolicy, ReportRun, RuntimeComparison,
+    RIPHT_REPORT_ARTIFACT,
+};
 pub use resiliency::{
     run_ripht_resiliency, ResiliencyRun, RIPHT_RESILIENCY_ARTIFACT,
 };

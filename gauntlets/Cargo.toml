@@ -32,3 +32,7 @@ path = "src/bin/gauntlet-fpm-parity.rs"
 [[bin]]
 name = "gauntlet-frankenphp-parity"
 path = "src/bin/gauntlet-frankenphp-parity.rs"
+
+[[bin]]
+name = "gauntlet-report"
+path = "src/bin/gauntlet-report.rs"
