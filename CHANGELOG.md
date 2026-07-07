@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.1.0-beta.1] - 2026-07-07
+
+### Added
+- Host sink execution APIs for observing response headers, body chunks,
+  flushes, finish, and abort outcomes.
+- `ExecutionControl` and execution options for request-scoped host
+  cancellation, client-closed state, and deadlines.
+- `ExecutionReport` fields for PHP success, exit status, timeout,
+  client-closed state, and post-finish continuation duration.
+- A gauntlet verification crate covering Ripht execution modes, lifecycle,
+  resiliency, reporting, PHP-FPM parity, FrankenPHP parity, and the composed
+  battery gate.
+
+### Changed
+- `fastcgi_finish_request()` now finalizes through the shared response
+  lifecycle, preserves pre-finish output, discards late output/headers, and
+  allows PHP shutdown/post-finish code to continue.
+- Streaming and hook execution now align with the same sink lifecycle used by
+  buffered and host-sink execution.
+- Build discovery now prefers `lib/bia-link-flags.txt` when present, fails
+  invalid explicit `RIPHT_PHP_SAPI_PREFIX` values, and keeps docs.rs builds
+  from requiring a local PHP prefix.
+
 ## [0.1.0-rc.9] - 2026-06-12
 
 ### Added

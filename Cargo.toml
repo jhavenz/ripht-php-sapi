@@ -1,6 +1,6 @@
 [package]
 name = "ripht-php-sapi"
-version = "0.1.0-rc.9"
+version = "0.1.0-beta.1"
 edition = "2021"
 authors = ["Jonathan Havens <mail@jhavens.tech>"]
 repository = "https://github.com/jhavenz/ripht-php-sapi"
