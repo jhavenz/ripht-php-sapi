@@ -37,6 +37,7 @@ pub struct BatterySummary {
     pub skipped: usize,
     pub required_failed: usize,
     pub optional_failed: usize,
+    pub blocking_failed: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -46,6 +47,7 @@ pub struct BatteryCaseReport {
     pub required: bool,
     pub passed: bool,
     pub skipped: bool,
+    pub blocking_failure: bool,
     pub artifact_path: PathBuf,
     pub failure_summary: Option<String>,
 }
@@ -137,6 +139,7 @@ fn required_case<R>(
                 required: true,
                 passed,
                 skipped: false,
+                blocking_failure: !passed,
                 artifact_path: artifact_report_path(artifact_name),
                 failure_summary: (!passed).then(|| {
                     format!("{name} reported failure in its artifact")
@@ -149,6 +152,7 @@ fn required_case<R>(
             required: true,
             passed: false,
             skipped: false,
+            blocking_failure: true,
             artifact_path: artifact_report_path(artifact_name),
             failure_summary: Some(format!("{name} failed to run: {err}")),
         },
@@ -210,10 +214,11 @@ fn external_case(
     strict_external: bool,
     differences: &[String],
 ) -> BatteryCaseReport {
-    let passed = if skipped {
-        !strict_external
+    let passed = !skipped && report_passed;
+    let blocking_failure = if skipped {
+        strict_external
     } else {
-        report_passed
+        !report_passed
     };
     let failure_summary = external_failure_summary(
         name,
@@ -230,6 +235,7 @@ fn external_case(
         required: false,
         passed,
         skipped,
+        blocking_failure,
         artifact_path: artifact_report_path(artifact_name),
         failure_summary,
     }
@@ -273,6 +279,7 @@ fn external_run_error(
         required: false,
         passed: false,
         skipped: false,
+        blocking_failure: true,
         artifact_path: artifact_report_path(artifact_name),
         failure_summary: Some(format!("{name} failed to run: {err}")),
     }
@@ -289,20 +296,25 @@ fn summarize_cases(cases: &[BatteryCaseReport]) -> BatterySummary {
         .count();
     let required_failed = cases
         .iter()
-        .filter(|case| case.required && !case.passed)
+        .filter(|case| case.required && case.blocking_failure)
         .count();
     let optional_failed = cases
         .iter()
-        .filter(|case| !case.required && !case.passed)
+        .filter(|case| !case.required && case.blocking_failure)
+        .count();
+    let failed = cases
+        .iter()
+        .filter(|case| !case.passed && !case.skipped)
         .count();
 
     BatterySummary {
         total: cases.len(),
         passed,
-        failed: cases.len() - passed,
+        failed,
         skipped,
         required_failed,
         optional_failed,
+        blocking_failed: required_failed + optional_failed,
     }
 }
 
@@ -335,7 +347,7 @@ mod tests {
     };
 
     #[test]
-    fn skipped_external_passes_default_battery() {
+    fn skipped_external_is_visible_and_non_blocking_by_default() {
         let case = external_case(
             "gauntlet-fpm-parity",
             "ripht-fpm-parity.json",
@@ -346,8 +358,9 @@ mod tests {
             &["php-fpm binary not found".to_string()],
         );
 
-        assert!(case.passed);
+        assert!(!case.passed);
         assert!(case.skipped);
+        assert!(!case.blocking_failure);
         assert_eq!(case.failure_summary, None);
         assert_eq!(
             case.artifact_path,
@@ -369,6 +382,7 @@ mod tests {
 
         assert!(!case.passed);
         assert!(case.skipped);
+        assert!(case.blocking_failure);
         assert!(case
             .failure_summary
             .as_deref()
@@ -390,6 +404,7 @@ mod tests {
 
         assert!(!case.passed);
         assert!(!case.skipped);
+        assert!(case.blocking_failure);
         assert_eq!(
             case.failure_summary,
             Some("RIPHT_GAUNTLET_FPM_BIN path does not exist".to_string())
@@ -409,6 +424,7 @@ mod tests {
         );
 
         assert!(!case.passed);
+        assert!(case.blocking_failure);
         assert_eq!(
             case.failure_summary,
             Some(
@@ -421,22 +437,29 @@ mod tests {
     #[test]
     fn summary_counts_required_and_optional_failures() {
         let cases = vec![
-            battery_case("required-pass", true, true, false),
-            battery_case("required-fail", true, false, false),
-            battery_case("optional-skip", false, true, true),
-            battery_case("optional-fail", false, false, false),
+            battery_case("required-pass", true, true, false, false),
+            battery_case("required-fail", true, false, false, true),
+            battery_case("optional-skip", false, false, true, false),
+            battery_case("optional-fail", false, false, false, true),
         ];
 
+        let summary = summarize_cases(&cases);
+
         assert_eq!(
-            summarize_cases(&cases),
+            summary,
             super::BatterySummary {
                 total: 4,
-                passed: 2,
+                passed: 1,
                 failed: 2,
                 skipped: 1,
                 required_failed: 1,
                 optional_failed: 1,
+                blocking_failed: 2,
             }
+        );
+        assert_eq!(
+            summary.total,
+            summary.passed + summary.failed + summary.skipped
         );
     }
 
@@ -445,6 +468,7 @@ mod tests {
         required: bool,
         passed: bool,
         skipped: bool,
+        blocking_failure: bool,
     ) -> BatteryCaseReport {
         BatteryCaseReport {
             name: name.to_string(),
@@ -452,6 +476,7 @@ mod tests {
             required,
             passed,
             skipped,
+            blocking_failure,
             artifact_path: PathBuf::from("gauntlets/artifacts/test.json"),
             failure_summary: None,
         }

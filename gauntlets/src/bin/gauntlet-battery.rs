@@ -6,7 +6,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let run = run_gauntlet_battery()?;
 
     println!(
-        "gauntlet-battery: {} total={} passed={} failed={} skipped={} required_failed={} optional_failed={} strict_external={} artifact={}",
+        "gauntlet-battery: {} total={} passed={} failed={} skipped={} required_failed={} optional_failed={} blocking_failed={} strict_external={} artifact={}",
         if run.report.passed { "pass" } else { "fail" },
         run.report.summary.total,
         run.report.summary.passed,
@@ -14,18 +14,20 @@ fn main() -> Result<(), Box<dyn Error>> {
         run.report.summary.skipped,
         run.report.summary.required_failed,
         run.report.summary.optional_failed,
+        run.report.summary.blocking_failed,
         run.report.strict_external,
         run.artifact_path.display()
     );
 
     for case in &run.report.cases {
         println!(
-            "gauntlet-battery: case={} group={} required={} passed={} skipped={} artifact={}",
+            "gauntlet-battery: case={} group={} required={} passed={} skipped={} blocking_failure={} artifact={}",
             case.name,
             case.group,
             case.required,
             case.passed,
             case.skipped,
+            case.blocking_failure,
             case.artifact_path.display()
         );
 
