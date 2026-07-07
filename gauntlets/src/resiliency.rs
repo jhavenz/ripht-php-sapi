@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -63,11 +64,16 @@ fn run_resiliency_scenario(
     scenario: &ResiliencyScenario,
 ) -> ResiliencyCaseReport {
     let sidecars = scenario_sidecars(scenario);
-    prepare_sidecars(&sidecars);
+    let preparation_failures = prepare_sidecars(&sidecars);
 
     let mut result = scenario.execute(&sidecars);
 
-    if result.failure.is_none() {
+    if !preparation_failures.is_empty() {
+        result.failure = Some(RuntimeFailure::new(
+            RuntimeFailureKind::Assertion,
+            preparation_failures.join("; "),
+        ));
+    } else if result.failure.is_none() {
         let failures = (scenario.assertion)(&result, &sidecars);
         if !failures.is_empty() {
             result.failure = Some(RuntimeFailure::new(
@@ -516,10 +522,22 @@ fn scenario_sidecars(scenario: &ResiliencyScenario) -> Vec<Sidecar> {
         .collect()
 }
 
-fn prepare_sidecars(sidecars: &[Sidecar]) {
+fn prepare_sidecars(sidecars: &[Sidecar]) -> Vec<String> {
+    let mut failures = Vec::new();
+
     for sidecar in sidecars {
-        let _ = fs::remove_file(&sidecar.path);
+        match fs::remove_file(&sidecar.path) {
+            Ok(()) => {}
+            Err(err) if err.kind() == ErrorKind::NotFound => {}
+            Err(err) => failures.push(format!(
+                "failed to remove stale {} sidecar `{}`: {err}",
+                sidecar.env_name,
+                sidecar.path.display()
+            )),
+        }
     }
+
+    failures
 }
 
 fn cleanup_sidecars(sidecars: &[Sidecar]) {
@@ -560,6 +578,7 @@ fn assert_client_closed_write(
     );
     require_event_reason(result, "ClientClosed", &mut failures);
     require_no_finish_event(result, &mut failures);
+    require_body_excludes(result, b"omega", &mut failures);
 
     failures
 }
@@ -605,6 +624,34 @@ fn assert_sink_finish_abort(
         result,
         |report| report.aborted,
         "expected aborted",
+        &mut failures,
+    );
+    require_report_field(
+        result,
+        |report| !report.client_closed,
+        "expected not client_closed",
+        &mut failures,
+    );
+    require_report_field(
+        result,
+        |report| !report.timed_out,
+        "expected not timed out",
+        &mut failures,
+    );
+    require_report_field(
+        result,
+        |report| !report.finalized_early,
+        "expected not finalized early",
+        &mut failures,
+    );
+    require_report_field(
+        result,
+        |report| {
+            report
+                .post_finish_duration_ms
+                .is_none()
+        },
+        "expected no post-finish duration",
         &mut failures,
     );
     require_abort_reason(result, "SinkFailure", &mut failures);
@@ -678,7 +725,7 @@ fn assert_deadline_pre_delivery(
     );
     require_abort_reason(result, "DeadlineExceeded", &mut failures);
     require_event_reason(result, "DeadlineExceeded", &mut failures);
-    require_no_write_event(result, &mut failures);
+    require_no_delivery_event(result, &mut failures);
 
     failures
 }
@@ -962,13 +1009,24 @@ fn require_no_finish_event(result: &RuntimeResult, failures: &mut Vec<String>) {
     }
 }
 
-fn require_no_write_event(result: &RuntimeResult, failures: &mut Vec<String>) {
+fn require_no_delivery_event(
+    result: &RuntimeResult,
+    failures: &mut Vec<String>,
+) {
     if result
         .events
         .iter()
-        .any(|event| matches!(event, LifecycleEvent::Write { .. }))
+        .any(|event| {
+            matches!(
+                event,
+                LifecycleEvent::Headers { .. }
+                    | LifecycleEvent::Write { .. }
+                    | LifecycleEvent::Flush
+                    | LifecycleEvent::Finish
+            )
+        })
     {
-        failures.push("expected no write event".to_string());
+        failures.push("expected no response delivery event".to_string());
     }
 }
 
@@ -1073,10 +1131,11 @@ fn now_unix_epoch_secs() -> std::io::Result<u64> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_ripht_resiliency_report, require_body_contains,
-        require_body_excludes,
+        assert_client_closed_write, assert_deadline_pre_delivery,
+        assert_sink_finish_abort, build_ripht_resiliency_report,
+        require_body_contains, require_body_excludes,
     };
-    use crate::{RuntimeMode, RuntimeResult};
+    use crate::{LifecycleEvent, ReportMetadata, RuntimeMode, RuntimeResult};
 
     #[test]
     fn resiliency_report_requires_all_cases_to_pass() {
@@ -1113,5 +1172,126 @@ mod tests {
         require_body_excludes(&result, b"omega", &mut failures);
 
         assert!(failures.is_empty());
+    }
+
+    #[test]
+    fn sink_finish_abort_rejects_extra_classification_state() {
+        let result = result_with_report(
+            ReportMetadata {
+                status_code: 200,
+                exit_status: 0,
+                php_success: true,
+                finalized_early: true,
+                aborted: true,
+                client_closed: true,
+                timed_out: true,
+                post_finish_duration_ms: Some(1),
+                abort_reason: Some("SinkFailure".to_string()),
+            },
+            vec![
+                LifecycleEvent::Finish,
+                LifecycleEvent::Abort {
+                    reason: "SinkFailure".to_string(),
+                },
+            ],
+            b"alphaomega".to_vec(),
+        );
+
+        let failures = assert_sink_finish_abort(&result, &[]);
+
+        assert!(failures
+            .iter()
+            .any(|failure| failure == "expected not client_closed"));
+        assert!(failures
+            .iter()
+            .any(|failure| failure == "expected not timed out"));
+        assert!(failures
+            .iter()
+            .any(|failure| failure == "expected not finalized early"));
+        assert!(failures
+            .iter()
+            .any(|failure| failure == "expected no post-finish duration"));
+    }
+
+    #[test]
+    fn deadline_pre_delivery_rejects_response_delivery_events() {
+        let result = result_with_report(
+            ReportMetadata {
+                status_code: 200,
+                exit_status: 0,
+                php_success: true,
+                finalized_early: false,
+                aborted: true,
+                client_closed: false,
+                timed_out: true,
+                post_finish_duration_ms: None,
+                abort_reason: Some("DeadlineExceeded".to_string()),
+            },
+            vec![
+                LifecycleEvent::Headers {
+                    status_code: 200,
+                    headers: Vec::new(),
+                },
+                LifecycleEvent::Abort {
+                    reason: "DeadlineExceeded".to_string(),
+                },
+            ],
+            Vec::new(),
+        );
+
+        let failures = assert_deadline_pre_delivery(&result, &[]);
+
+        assert!(failures
+            .iter()
+            .any(|failure| failure == "expected no response delivery event"));
+    }
+
+    #[test]
+    fn client_closed_write_rejects_later_fixture_output() {
+        let result = result_with_report(
+            ReportMetadata {
+                status_code: 200,
+                exit_status: 0,
+                php_success: true,
+                finalized_early: false,
+                aborted: false,
+                client_closed: true,
+                timed_out: false,
+                post_finish_duration_ms: None,
+                abort_reason: None,
+            },
+            vec![LifecycleEvent::Abort {
+                reason: "ClientClosed".to_string(),
+            }],
+            b"alphaomega".to_vec(),
+        );
+
+        let failures = assert_client_closed_write(&result, &[]);
+
+        assert!(failures
+            .iter()
+            .any(|failure| failure == "expected body to exclude `omega`"));
+    }
+
+    fn result_with_report(
+        report: ReportMetadata,
+        events: Vec<LifecycleEvent>,
+        body: Vec<u8>,
+    ) -> RuntimeResult {
+        RuntimeResult {
+            runtime: "ripht".to_string(),
+            mode: RuntimeMode::RiphtSinkWithOptions,
+            case: "helper".to_string(),
+            status_code: Some(200),
+            exit_status: Some(0),
+            headers: Vec::new(),
+            body,
+            messages: Vec::new(),
+            report: Some(report),
+            events,
+            duration_ms: 0,
+            artifact_path: None,
+            failure: None,
+        }
     }
 }

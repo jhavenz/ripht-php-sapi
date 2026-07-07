@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -20,6 +20,22 @@ fn sidecar_path(name: &str) -> PathBuf {
         std::process::id(),
         name
     ))
+}
+
+fn shutdown_exit_request(marker_path: &Path, code: i32) -> ExecutionContext {
+    let script_path = php_script_path("shutdown_exit.php");
+    let uri = format!("/shutdown_exit.php?code={code}");
+
+    WebRequest::get()
+        .with_uri(&uri)
+        .with_env(
+            "RIPHT_SHUTDOWN_EXIT_PATH",
+            marker_path
+                .to_string_lossy()
+                .into_owned(),
+        )
+        .build(&script_path)
+        .expect("failed to build shutdown-exit WebRequest")
 }
 
 fn execute_streaming_collect(
@@ -481,6 +497,19 @@ impl ExecutionHooks for FlushCaptureHooks {
         let mut flushes = self.flushes.lock().unwrap();
 
         *flushes += 1;
+    }
+}
+
+struct ScriptStatusHooks {
+    statuses: Arc<std::sync::Mutex<Vec<bool>>>,
+}
+
+impl ExecutionHooks for ScriptStatusHooks {
+    fn on_script_executed(&mut self, success: bool) {
+        self.statuses
+            .lock()
+            .unwrap()
+            .push(success);
     }
 }
 
@@ -2340,6 +2369,146 @@ fn exit_status_reports_php_exit_code() {
 }
 
 #[test]
+fn exit_status_reports_shutdown_exit_code() {
+    let php = RiphtSapi::instance();
+    let marker_path = sidecar_path("buffered-shutdown-exit");
+    let _ = std::fs::remove_file(&marker_path);
+
+    let result = php
+        .execute(shutdown_exit_request(&marker_path, 77))
+        .expect("shutdown-exit request execution failed");
+
+    assert_eq!(result.status_code(), 200);
+    assert_eq!(result.exit_status(), 77);
+    assert_eq!(result.body(), b"before-shutdown");
+    assert_eq!(
+        std::fs::read_to_string(&marker_path)
+            .expect("shutdown-exit fixture should write marker"),
+        "shutdown"
+    );
+
+    let _ = std::fs::remove_file(marker_path);
+}
+
+#[test]
+fn streaming_exit_status_reports_shutdown_exit_code() {
+    let php = RiphtSapi::instance();
+    let marker_path = sidecar_path("streaming-shutdown-exit");
+    let _ = std::fs::remove_file(&marker_path);
+
+    let (result, body) = execute_streaming_collect(
+        &php,
+        shutdown_exit_request(&marker_path, 78),
+    );
+
+    assert_eq!(result.status_code(), 200);
+    assert_eq!(result.exit_status(), 78);
+    assert_eq!(body, b"before-shutdown");
+    assert_eq!(
+        std::fs::read_to_string(&marker_path)
+            .expect("shutdown-exit fixture should write marker"),
+        "shutdown"
+    );
+
+    let _ = std::fs::remove_file(marker_path);
+}
+
+#[test]
+fn execute_with_sink_reports_shutdown_exit_as_php_failure() {
+    let php = RiphtSapi::instance();
+    let marker_path = sidecar_path("sink-shutdown-exit");
+    let _ = std::fs::remove_file(&marker_path);
+    let events = Arc::new(std::sync::Mutex::new(Vec::<SinkEvent>::new()));
+
+    let report = php
+        .execute_with_sink(
+            shutdown_exit_request(&marker_path, 79),
+            RecordingSink::new(Arc::clone(&events)),
+        )
+        .expect("shutdown-exit sink request execution failed");
+
+    assert_eq!(report.status_code, 200);
+    assert_eq!(report.exit_status, 79);
+    assert!(!report.php_success);
+    assert!(!report.aborted);
+    assert!(!report.client_closed);
+    assert!(!report.timed_out);
+    assert_eq!(report.abort_reason, None);
+    assert_eq!(
+        std::fs::read_to_string(&marker_path)
+            .expect("shutdown-exit fixture should write marker"),
+        "shutdown"
+    );
+
+    let body = events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|event| match event {
+            SinkEvent::Write(bytes) => Some(bytes.as_str()),
+            _ => None,
+        })
+        .collect::<String>();
+
+    assert_eq!(body, "before-shutdown");
+
+    let _ = std::fs::remove_file(marker_path);
+}
+
+#[test]
+fn execute_with_hooks_reports_shutdown_exit_in_final_result() {
+    let php = RiphtSapi::instance();
+    let marker_path = sidecar_path("hooks-shutdown-exit");
+    let _ = std::fs::remove_file(&marker_path);
+    let statuses = Arc::new(std::sync::Mutex::new(Vec::<bool>::new()));
+
+    let result = php
+        .execute_with_hooks(
+            shutdown_exit_request(&marker_path, 80),
+            ScriptStatusHooks {
+                statuses: Arc::clone(&statuses),
+            },
+        )
+        .expect("shutdown-exit hooks request execution failed");
+
+    assert_eq!(result.status_code(), 200);
+    assert_eq!(result.exit_status(), 80);
+    assert_eq!(result.body(), b"before-shutdown");
+    assert_eq!(*statuses.lock().unwrap(), vec![true]);
+    assert_eq!(
+        std::fs::read_to_string(&marker_path)
+            .expect("shutdown-exit fixture should write marker"),
+        "shutdown"
+    );
+
+    let _ = std::fs::remove_file(marker_path);
+}
+
+#[test]
+fn execute_with_hooks_reports_fatal_script_failure() {
+    let php = RiphtSapi::instance();
+    let script_path = php_script_path("shutdown_behavior.php");
+    let statuses = Arc::new(std::sync::Mutex::new(Vec::<bool>::new()));
+
+    let exec = WebRequest::get()
+        .with_uri("/shutdown_behavior.php?action=fatal")
+        .build(&script_path)
+        .expect("failed to build fatal hooks WebRequest");
+    let result = php
+        .execute_with_hooks(
+            exec,
+            ScriptStatusHooks {
+                statuses: Arc::clone(&statuses),
+            },
+        )
+        .expect("fatal hooks request execution failed");
+
+    assert_eq!(result.status_code(), 200);
+    assert_ne!(result.exit_status(), 0);
+    assert_eq!(*statuses.lock().unwrap(), vec![false]);
+}
+
+#[test]
 fn streaming_exit_status_reports_php_fatal_error() {
     let php = RiphtSapi::instance();
     let script_path = php_script_path("shutdown_behavior.php");
@@ -2376,7 +2545,7 @@ fn streaming_exit_status_reports_php_fatal_error() {
 }
 
 #[test]
-fn zz_execute_with_sink_reports_php_failure_for_fatal_error() {
+fn execute_with_sink_reports_php_failure_for_fatal_error() {
     let php = RiphtSapi::instance();
     let script_path = php_script_path("shutdown_behavior.php");
     let events = Arc::new(std::sync::Mutex::new(Vec::<SinkEvent>::new()));

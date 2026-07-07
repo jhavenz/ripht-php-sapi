@@ -114,10 +114,10 @@ impl<'sapi> Executor<'sapi> {
             Self::apply_ini_overrides(&*ctx_ptr);
             ffi::ripht_php_sapi_reset_exit_status();
             Self::run_script(&script_cstr);
-            let exit_status = ffi::ripht_php_sapi_exit_status();
 
             ffi::sapi_globals.post_read = 1;
             ffi::php_request_shutdown(std::ptr::null_mut());
+            let exit_status = ffi::ripht_php_sapi_exit_status();
             ffi::sapi_globals.server_context = std::ptr::null_mut();
 
             let mut server_ctx = Box::from_raw(ctx_ptr);
@@ -210,8 +210,6 @@ impl<'sapi> Executor<'sapi> {
             trace!("Executing script");
 
             let exec_result = Self::run_script(&script_cstr);
-            let exit_status = ffi::ripht_php_sapi_exit_status();
-            let success = exec_result != ffi::FAILURE && exit_status == 0;
             (*ctx_ptr).observe_control_state();
 
             #[cfg(feature = "tracing")]
@@ -219,6 +217,8 @@ impl<'sapi> Executor<'sapi> {
 
             ffi::sapi_globals.post_read = 1;
             ffi::php_request_shutdown(std::ptr::null_mut());
+            let exit_status = ffi::ripht_php_sapi_exit_status();
+            let success = exec_result != ffi::FAILURE && exit_status == 0;
             ffi::sapi_globals.server_context = std::ptr::null_mut();
 
             let mut server_ctx = Box::from_raw(ctx_ptr);
@@ -308,8 +308,9 @@ impl<'sapi> Executor<'sapi> {
             trace!("Executing script");
 
             let exec_result = Self::run_script(&script_cstr);
-            let exit_status = ffi::ripht_php_sapi_exit_status();
-            let success = exec_result != ffi::FAILURE;
+            let script_exit_status = ffi::ripht_php_sapi_exit_status();
+            let success =
+                exec_result != ffi::FAILURE && script_exit_status == 0;
             hooks
                 .borrow_mut()
                 .on_script_executed(success);
@@ -323,6 +324,7 @@ impl<'sapi> Executor<'sapi> {
 
             ffi::sapi_globals.post_read = 1;
             ffi::php_request_shutdown(std::ptr::null_mut());
+            let exit_status = ffi::ripht_php_sapi_exit_status();
             ffi::sapi_globals.server_context = std::ptr::null_mut();
 
             let mut server_ctx = Box::from_raw(ctx_ptr);
