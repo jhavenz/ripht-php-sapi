@@ -1,4 +1,5 @@
 mod artifact;
+mod battery;
 mod case;
 mod event;
 mod fpm;
@@ -14,6 +15,10 @@ mod smoke;
 
 pub use artifact::{
     artifact_path, artifact_report_path, write_json_artifact, ARTIFACT_DIR_ENV,
+};
+pub use battery::{
+    run_gauntlet_battery, BatteryCaseReport, BatteryReport, BatteryRun,
+    BatterySummary, RIPHT_BATTERY_ARTIFACT, STRICT_EXTERNAL_ENV,
 };
 pub use case::{GauntletCase, HttpMethod};
 pub use event::{HeaderValue, LifecycleEvent};
