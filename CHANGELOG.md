@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.1.0-beta.1] - 2026-07-07
+## [0.2.0-beta.1] - 2026-07-07
 
 ### Added
 - Host sink execution APIs for observing response headers, body chunks,
