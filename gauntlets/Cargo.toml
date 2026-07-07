@@ -20,3 +20,7 @@ path = "src/bin/gauntlet-ripht-modes.rs"
 [[bin]]
 name = "gauntlet-lifecycle"
 path = "src/bin/gauntlet-lifecycle.rs"
+
+[[bin]]
+name = "gauntlet-resiliency"
+path = "src/bin/gauntlet-resiliency.rs"

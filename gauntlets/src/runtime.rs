@@ -134,3 +134,17 @@ pub struct LifecycleCaseReport {
     pub passed: bool,
     pub results: Vec<RuntimeResult>,
 }
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ResiliencyReport {
+    pub generated_unix_epoch_secs: u64,
+    pub passed: bool,
+    pub cases: Vec<ResiliencyCaseReport>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ResiliencyCaseReport {
+    pub case: String,
+    pub passed: bool,
+    pub result: RuntimeResult,
+}
