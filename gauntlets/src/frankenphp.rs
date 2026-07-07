@@ -303,7 +303,7 @@ impl std::fmt::Display for FrankenPhpStartError {
 
 impl FrankenPhpStartError {
     fn is_skip(&self) -> bool {
-        matches!(self, Self::MissingBinary | Self::InvalidEnvPath(_))
+        matches!(self, Self::MissingBinary)
     }
 }
 
@@ -378,8 +378,8 @@ struct FrankenPhpResponse {
     messages: Vec<RuntimeMessage>,
 }
 
-fn write_http_request(
-    stream: &mut TcpStream,
+fn write_http_request<W: Write>(
+    stream: &mut W,
     port: u16,
     case: &GauntletCase,
 ) -> Result<(), String> {
@@ -398,10 +398,6 @@ fn write_http_request(
         "{method} {request_uri} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n"
     )
     .map_err(|err| err.to_string())?;
-
-    for (name, value) in &case.env {
-        write!(stream, "{name}: {value}\r\n").map_err(|err| err.to_string())?;
-    }
 
     if !body.is_empty() {
         let content_type = case
@@ -475,7 +471,7 @@ fn parse_http_response(bytes: &[u8]) -> Result<FrankenPhpResponse, String> {
 
     Ok(FrankenPhpResponse {
         status_code,
-        exit_status: Some(0),
+        exit_status: None,
         headers,
         body,
         messages: Vec::new(),
@@ -609,7 +605,7 @@ fn now_unix_epoch_secs() -> std::io::Result<u64> {
 mod tests {
     use super::{
         decode_chunked_body, parse_http_response, truncate_to_content_length,
-        FrankenPhpStartError,
+        write_http_request, FrankenPhpStartError,
     };
     use crate::{
         compare_runtime_parity, HeaderValue, RuntimeMode, RuntimeResult,
@@ -623,11 +619,29 @@ mod tests {
         .expect("HTTP response should parse");
 
         assert_eq!(parsed.status_code, 201);
+        assert_eq!(parsed.exit_status, None);
         assert_eq!(parsed.headers.len(), 3);
         assert_eq!(parsed.headers[0].name, "X-Test");
         assert_eq!(parsed.headers[0].value, "one");
         assert_eq!(parsed.headers[1].value, "two");
         assert_eq!(parsed.body, b"body");
+    }
+
+    #[test]
+    fn http_request_does_not_emit_env_as_headers() {
+        let case = crate::GauntletCase::get(
+            "frankenphp_env_boundary",
+            "sink_events.php",
+        )
+        .with_env("FOO", "bar");
+        let mut request = Vec::new();
+
+        write_http_request(&mut request, 8080, &case)
+            .expect("HTTP request should write");
+        let request_text =
+            String::from_utf8(request).expect("HTTP request should be UTF-8");
+
+        assert!(!request_text.contains("\r\nFOO: bar\r\n"));
     }
 
     #[test]
@@ -681,7 +695,7 @@ mod tests {
     #[test]
     fn frankenphp_start_skip_is_limited_to_missing_binary_cases() {
         assert!(FrankenPhpStartError::MissingBinary.is_skip());
-        assert!(FrankenPhpStartError::InvalidEnvPath("missing".to_string())
+        assert!(!FrankenPhpStartError::InvalidEnvPath("missing".to_string())
             .is_skip());
         assert!(!FrankenPhpStartError::Spawn("boom".to_string()).is_skip());
         assert!(!FrankenPhpStartError::Timeout("log".to_string()).is_skip());

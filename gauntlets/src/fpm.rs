@@ -310,7 +310,7 @@ impl std::fmt::Display for FpmStartError {
 
 impl FpmStartError {
     fn is_skip(&self) -> bool {
-        matches!(self, Self::MissingBinary | Self::InvalidEnvPath(_))
+        matches!(self, Self::MissingBinary)
     }
 }
 
@@ -791,7 +791,7 @@ mod tests {
     #[test]
     fn fpm_start_skip_is_limited_to_missing_binary_cases() {
         assert!(FpmStartError::MissingBinary.is_skip());
-        assert!(FpmStartError::InvalidEnvPath("missing".to_string()).is_skip());
+        assert!(!FpmStartError::InvalidEnvPath("missing".to_string()).is_skip());
         assert!(!FpmStartError::Spawn("boom".to_string()).is_skip());
         assert!(!FpmStartError::Timeout("log".to_string()).is_skip());
     }

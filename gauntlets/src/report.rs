@@ -176,7 +176,7 @@ pub fn report_policy() -> ReportPolicy {
             "body".to_string(),
             "runtime failure state".to_string(),
             "probe headers".to_string(),
-            "external runtime messages".to_string(),
+            "reported external runtime messages".to_string(),
         ],
         probe_headers: vec![HeaderExpectation {
             name: PROBE_HEADER_NAME.to_string(),
@@ -189,6 +189,8 @@ pub fn report_policy() -> ReportPolicy {
         allowed_divergences: vec![
             "transport headers outside the probe set".to_string(),
             "runtime duration differences".to_string(),
+            "process/server logs are not request-scoped or normalized in this report"
+                .to_string(),
         ],
         timing_tolerances: vec![
             "duration_ms is recorded for review and never exact-matched"
@@ -415,6 +417,13 @@ mod tests {
         assert!(policy
             .ignored_headers
             .contains(&"Date".to_string()));
+        assert!(policy
+            .exact_fields
+            .contains(&"reported external runtime messages".to_string()));
+        assert!(policy.allowed_divergences.contains(
+            &"process/server logs are not request-scoped or normalized in this report"
+                .to_string()
+        ));
         assert!(policy
             .skip_semantics
             .contains("missing optional external binaries skip"));
