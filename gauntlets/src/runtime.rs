@@ -17,6 +17,7 @@ pub enum RuntimeMode {
     RiphtHooks,
     RiphtSink,
     RiphtSinkWithOptions,
+    PhpFpm,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -147,4 +148,23 @@ pub struct ResiliencyCaseReport {
     pub case: String,
     pub passed: bool,
     pub result: RuntimeResult,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FpmParityReport {
+    pub generated_unix_epoch_secs: u64,
+    pub passed: bool,
+    pub skipped: bool,
+    pub skip_reason: Option<String>,
+    pub case: String,
+    pub fpm_binary: Option<String>,
+    pub ripht: RuntimeResult,
+    pub php_fpm: Option<RuntimeResult>,
+    pub comparison: ParityComparison,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ParityComparison {
+    pub passed: bool,
+    pub differences: Vec<String>,
 }

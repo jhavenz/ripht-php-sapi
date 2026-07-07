@@ -24,3 +24,7 @@ path = "src/bin/gauntlet-lifecycle.rs"
 [[bin]]
 name = "gauntlet-resiliency"
 path = "src/bin/gauntlet-resiliency.rs"
+
+[[bin]]
+name = "gauntlet-fpm-parity"
+path = "src/bin/gauntlet-fpm-parity.rs"
