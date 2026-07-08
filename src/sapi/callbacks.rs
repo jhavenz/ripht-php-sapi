@@ -325,6 +325,10 @@ unsafe fn register_cli_args(array: *mut ffi::zval, argv: &[Vec<u8>]) {
         .map(Vec::len)
         .collect();
 
+    // SAFETY: `ptrs` and `lens` are derived from `argv` byte buffers that
+    // remain alive for the duration of this synchronous PHP registration call.
+    // The C shim copies each byte slice into PHP-owned zvals before returning,
+    // and this helper is only called inside the callback's panic boundary.
     ffi::ripht_sapi_register_cli_args(
         array,
         argc,
