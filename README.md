@@ -99,7 +99,7 @@ println!("Response: {}", res.body_string());
 
 ### CLI Example
 
-Run a script as if from the command line. This sets `argc`/`argv` and avoids HTTP superglobals.
+Run a script as if from the command line. This sets CLI-compatible `$argc`/`$argv` and avoids HTTP superglobals.
 
 ```rust
 use ripht_php_sapi::prelude::*;

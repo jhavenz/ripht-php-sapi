@@ -9,6 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub struct ServerVars {
     cookie: Option<String>,
     vars: Vec<(String, String)>,
+    cli_argv: Option<Vec<String>>,
     content_type: Option<String>,
     query_string: Option<String>,
     request_method: Option<String>,
@@ -205,12 +206,17 @@ impl ServerVars {
         self.set("HTTP_COOKIE", cookie_str)
     }
 
-    pub fn argc(&mut self, count: usize) -> &mut Self {
-        self.set("argc", count.to_string())
-    }
-
-    pub fn argv(&mut self, args: &str) -> &mut Self {
-        self.set("argv", args)
+    pub fn cli_argv<I, S>(&mut self, args: I) -> &mut Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.cli_argv = Some(
+            args.into_iter()
+                .map(Into::into)
+                .collect(),
+        );
+        self
     }
 
     pub fn pwd(&mut self, path: &Path) -> &mut Self {
@@ -260,6 +266,12 @@ impl ServerVars {
     }
 
     pub fn into_cstring_pairs(self) -> ServerVarsCString {
+        let cli_argv = self.cli_argv.map(|args| {
+            args.into_iter()
+                .map(String::into_bytes)
+                .collect()
+        });
+
         let vars: Vec<(CString, CString)> = self
             .vars
             .into_iter()
@@ -286,6 +298,7 @@ impl ServerVars {
 
         ServerVarsCString {
             vars,
+            cli_argv,
             content_type,
             query_string,
             cookie,
@@ -296,6 +309,7 @@ impl ServerVars {
 
 pub struct ServerVarsCString {
     pub vars: Vec<(CString, CString)>,
+    pub cli_argv: Option<Vec<Vec<u8>>>,
     pub content_type: Option<CString>,
     pub query_string: Option<CString>,
     pub cookie: Option<CString>,

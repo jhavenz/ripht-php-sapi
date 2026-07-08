@@ -531,6 +531,12 @@ extern "C" {
         error_msg: *const c_char,
         ...
     );
+    pub fn ripht_sapi_register_cli_args(
+        track_vars_array: *mut zval,
+        argc: c_uint,
+        argv: *const *const c_char,
+        argv_lens: *const usize,
+    );
     pub fn zend_stream_init_filename(
         handle: *mut zend_file_handle,
         filename: *const c_char,

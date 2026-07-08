@@ -260,6 +260,12 @@ impl ServerContext {
             .unwrap_or(&[])
     }
 
+    pub fn cli_argv(&self) -> Option<&[Vec<u8>]> {
+        self.vars
+            .as_ref()
+            .and_then(|v| v.cli_argv.as_deref())
+    }
+
     pub fn read_post(&self, buffer: &mut [u8]) -> usize {
         if buffer.is_empty() {
             return 0;

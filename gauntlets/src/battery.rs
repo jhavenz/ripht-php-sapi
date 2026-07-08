@@ -2,13 +2,14 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{
-    artifact_path, artifact_report_path, run_fpm_parity, run_frankenphp_parity,
-    run_gauntlet_report, run_ripht_lifecycle, run_ripht_modes,
-    run_ripht_resiliency, run_ripht_smoke, write_json_artifact, LifecycleRun,
-    ModesRun, ReportRun, ResiliencyRun, SmokeRun, RIPHT_FPM_PARITY_ARTIFACT,
-    RIPHT_FRANKENPHP_PARITY_ARTIFACT, RIPHT_LIFECYCLE_ARTIFACT,
-    RIPHT_MODES_ARTIFACT, RIPHT_REPORT_ARTIFACT, RIPHT_RESILIENCY_ARTIFACT,
-    RIPHT_SMOKE_ARTIFACT,
+    artifact_path, artifact_report_path, run_cli_parity, run_fpm_parity,
+    run_frankenphp_parity, run_gauntlet_report, run_ripht_lifecycle,
+    run_ripht_modes, run_ripht_resiliency, run_ripht_smoke,
+    write_json_artifact, CliParityRun, LifecycleRun, ModesRun, ReportRun,
+    ResiliencyRun, SmokeRun, RIPHT_CLI_PARITY_ARTIFACT,
+    RIPHT_FPM_PARITY_ARTIFACT, RIPHT_FRANKENPHP_PARITY_ARTIFACT,
+    RIPHT_LIFECYCLE_ARTIFACT, RIPHT_MODES_ARTIFACT, RIPHT_REPORT_ARTIFACT,
+    RIPHT_RESILIENCY_ARTIFACT, RIPHT_SMOKE_ARTIFACT,
 };
 
 pub const RIPHT_BATTERY_ARTIFACT: &str = "ripht-battery.json";
@@ -106,6 +107,13 @@ fn build_gauntlet_battery_report(
             RIPHT_REPORT_ARTIFACT,
             run_gauntlet_report,
             |run: &ReportRun| run.report.passed,
+        ),
+        required_case(
+            "gauntlet-cli-parity",
+            "external_parity",
+            RIPHT_CLI_PARITY_ARTIFACT,
+            run_cli_parity,
+            |run: &CliParityRun| run.report.passed,
         ),
         fpm_parity_case(strict_external),
         frankenphp_parity_case(strict_external),

@@ -1,6 +1,7 @@
 mod artifact;
 mod battery;
 mod case;
+mod cli;
 mod event;
 mod fpm;
 mod frankenphp;
@@ -21,6 +22,9 @@ pub use battery::{
     BatterySummary, RIPHT_BATTERY_ARTIFACT, STRICT_EXTERNAL_ENV,
 };
 pub use case::{GauntletCase, HttpMethod};
+pub use cli::{
+    run_cli_parity, CliParityRun, PHP_CLI_BIN_ENV, RIPHT_CLI_PARITY_ARTIFACT,
+};
 pub use event::{HeaderValue, LifecycleEvent};
 pub use fpm::{
     run_fpm_parity, FpmParityRun, FPM_BIN_ENV, RIPHT_FPM_PARITY_ARTIFACT,
@@ -47,11 +51,11 @@ pub use ripht::{
     RiphtSinkAdapter, RiphtSinkWithOptionsAdapter, RiphtStreamingAdapter,
 };
 pub use runtime::{
-    FpmParityReport, FrankenPhpParityReport, LifecycleCaseReport,
-    LifecycleReport, ModesReport, ParityComparison, ReportMetadata,
-    ResiliencyCaseReport, ResiliencyReport, RuntimeAdapter, RuntimeFailure,
-    RuntimeFailureKind, RuntimeMessage, RuntimeMode, RuntimeResult,
-    SmokeReport,
+    CliParityReport, FpmParityReport, FrankenPhpParityReport,
+    LifecycleCaseReport, LifecycleReport, ModesReport, ParityComparison,
+    ReportMetadata, ResiliencyCaseReport, ResiliencyReport, RuntimeAdapter,
+    RuntimeFailure, RuntimeFailureKind, RuntimeMessage, RuntimeMode,
+    RuntimeResult, SmokeReport,
 };
 pub use sink::RecordingSink;
 pub use smoke::{run_ripht_smoke, SmokeRun, RIPHT_SMOKE_ARTIFACT};

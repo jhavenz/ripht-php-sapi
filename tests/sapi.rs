@@ -3,9 +3,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use ripht_php_sapi::{
-    AbortReason, ExecutionContext, ExecutionControl, ExecutionError,
-    ExecutionHooks, ExecutionOptions, OutputAction, ResponseHeader,
-    ResponseSink, RiphtSapi, SinkResult, WebRequest,
+    AbortReason, CliRequest, ExecutionContext, ExecutionControl,
+    ExecutionError, ExecutionHooks, ExecutionOptions, OutputAction,
+    ResponseHeader, ResponseSink, RiphtSapi, SinkResult, WebRequest,
 };
 
 fn php_script_path(name: &str) -> PathBuf {
@@ -1647,6 +1647,100 @@ fn post_request_works() {
         .expect("failed to parse response body as JSON");
 
     assert_eq!(json["method"], "POST");
+}
+
+#[test]
+fn cli_request_populates_argv_and_argc_like_php_cli() {
+    let php = RiphtSapi::instance();
+    let script_path = php_script_path("cli_argv.php");
+
+    let exec = CliRequest::new()
+        .with_arg("alpha")
+        .with_arg("two words")
+        .with_arg("--flag=value")
+        .build(&script_path)
+        .expect("failed to build CLI request");
+
+    let result = php
+        .execute(exec)
+        .expect("cli_argv.php execution failed");
+
+    assert_eq!(result.status_code(), 200);
+
+    let json: serde_json::Value = serde_json::from_str(&result.body_string())
+        .expect("failed to parse response body as JSON");
+
+    let expected_argv = serde_json::json!([
+        "cli_argv.php",
+        "alpha",
+        "two words",
+        "--flag=value",
+    ]);
+
+    assert_eq!(json["server_argv_is_array"], true);
+    assert_eq!(json["global_argv_is_array"], true);
+    assert_eq!(json["server_argc_type"], "integer");
+    assert_eq!(json["global_argc_type"], "integer");
+    assert_eq!(json["server_argv"], expected_argv);
+    assert_eq!(json["global_argv"], expected_argv);
+    assert_eq!(json["server_argc"], 4);
+    assert_eq!(json["global_argc"], 4);
+}
+
+#[test]
+fn cli_request_populates_script_only_argv_without_leaking_prior_args() {
+    let php = RiphtSapi::instance();
+    let script_path = php_script_path("cli_argv.php");
+
+    let exec = CliRequest::new()
+        .build(&script_path)
+        .expect("failed to build CLI request");
+
+    let result = php
+        .execute(exec)
+        .expect("cli_argv.php execution failed");
+
+    assert_eq!(result.status_code(), 200);
+
+    let json: serde_json::Value = serde_json::from_str(&result.body_string())
+        .expect("failed to parse response body as JSON");
+
+    let expected_argv = serde_json::json!(["cli_argv.php"]);
+
+    assert_eq!(json["server_argv_is_array"], true);
+    assert_eq!(json["global_argv_is_array"], true);
+    assert_eq!(json["server_argv"], expected_argv);
+    assert_eq!(json["global_argv"], expected_argv);
+    assert_eq!(json["server_argc"], 1);
+    assert_eq!(json["global_argc"], 1);
+}
+
+#[test]
+fn web_request_does_not_populate_cli_argv_or_argc() {
+    let php = RiphtSapi::instance();
+    let script_path = php_script_path("cli_argv.php");
+
+    let exec = WebRequest::get()
+        .build(&script_path)
+        .expect("failed to build WebRequest");
+
+    let result = php
+        .execute(exec)
+        .expect("cli_argv.php web execution failed");
+
+    assert_eq!(result.status_code(), 200);
+
+    let json: serde_json::Value = serde_json::from_str(&result.body_string())
+        .expect("failed to parse response body as JSON");
+
+    assert_eq!(json["server_argv_is_array"], false);
+    assert_eq!(json["global_argv_is_array"], false);
+    assert_eq!(json["server_argc_type"], "NULL");
+    assert_eq!(json["global_argc_type"], "NULL");
+    assert!(json["server_argv"].is_null());
+    assert!(json["global_argv"].is_null());
+    assert!(json["server_argc"].is_null());
+    assert!(json["global_argc"].is_null());
 }
 
 #[test]

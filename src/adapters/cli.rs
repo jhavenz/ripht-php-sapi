@@ -50,6 +50,7 @@ impl Default for CliRequest {
             working_dir: Default::default(),
             env_vars: Default::default(),
             ini_overrides: vec![
+                ("register_argc_argv".to_string(), "0".to_string()),
                 ("html_errors".to_string(), "0".to_string()),
                 ("display_errors".to_string(), "1".to_string()),
                 ("implicit_flush".to_string(), "1".to_string()),
@@ -181,20 +182,16 @@ impl CliRequest {
             })
             .unwrap_or_default();
 
-        let argc = self.argv.len() + 1;
-
-        let argv_str = std::iter::once(script_name.clone())
+        let argv = std::iter::once(script_name.clone())
             .chain(self.argv.iter().cloned())
-            .collect::<Vec<_>>()
-            .join(" ");
+            .collect::<Vec<_>>();
 
         let mut vars = ServerVars::cli_defaults();
 
         vars.script_filename(&script_filename)
             .script_name(&script_name)
             .path_translated(&script_filename)
-            .argc(argc)
-            .argv(&argv_str);
+            .cli_argv(argv);
 
         if let Some(ref wd) = self.working_dir {
             vars.pwd(wd);

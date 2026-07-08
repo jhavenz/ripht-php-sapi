@@ -301,7 +301,36 @@ pub unsafe extern "C" fn ripht_sapi_register_server_variables(
                 track_vars_array,
             );
         }
+
+        if let Some(argv) = ctx.cli_argv() {
+            register_cli_args(track_vars_array, argv);
+        }
     }));
+}
+
+#[inline]
+unsafe fn register_cli_args(array: *mut ffi::zval, argv: &[Vec<u8>]) {
+    let argc = match c_uint::try_from(argv.len()) {
+        Ok(argc) => argc,
+        Err(_) => return,
+    };
+
+    let ptrs: Vec<*const c_char> = argv
+        .iter()
+        .map(|arg| arg.as_ptr() as *const c_char)
+        .collect();
+
+    let lens: Vec<usize> = argv
+        .iter()
+        .map(Vec::len)
+        .collect();
+
+    ffi::ripht_sapi_register_cli_args(
+        array,
+        argc,
+        ptrs.as_ptr(),
+        lens.as_ptr(),
+    );
 }
 
 #[inline]

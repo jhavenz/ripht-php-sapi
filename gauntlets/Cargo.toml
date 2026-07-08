@@ -38,5 +38,9 @@ name = "gauntlet-report"
 path = "src/bin/gauntlet-report.rs"
 
 [[bin]]
+name = "gauntlet-cli-parity"
+path = "src/bin/gauntlet-cli-parity.rs"
+
+[[bin]]
 name = "gauntlet-battery"
 path = "src/bin/gauntlet-battery.rs"

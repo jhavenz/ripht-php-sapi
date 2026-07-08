@@ -210,7 +210,9 @@ fn compile_sapi_shim(php_prefix: &Path) {
     fs::write(
         &shim_path,
         r#"#include <stdarg.h>
+#include <stdint.h>
 #include <main/php.h>
+#include <main/php_variables.h>
 
 int ripht_php_sapi_exit_status(void) {
     return EG(exit_status);
@@ -223,6 +225,36 @@ void ripht_php_sapi_reset_exit_status(void) {
 void ripht_sapi_error_shim(int type, const char *error_msg, ...) {
     (void) type;
     (void) error_msg;
+}
+
+void ripht_sapi_register_cli_args(
+    zval *track_vars_array,
+    uint32_t argc,
+    const char * const *argv,
+    const size_t *argv_lens
+) {
+    zval server_argv;
+    zval server_argc;
+    zval global_argv;
+    zval global_argc;
+
+    array_init_size(&server_argv, argc);
+    for (uint32_t i = 0; i < argc; i++) {
+        add_next_index_stringl(&server_argv, argv[i], argv_lens[i]);
+    }
+    php_register_variable_ex("argv", &server_argv, track_vars_array);
+
+    ZVAL_LONG(&server_argc, argc);
+    php_register_variable_ex("argc", &server_argc, track_vars_array);
+
+    array_init_size(&global_argv, argc);
+    for (uint32_t i = 0; i < argc; i++) {
+        add_next_index_stringl(&global_argv, argv[i], argv_lens[i]);
+    }
+    zend_hash_str_update(&EG(symbol_table), "argv", sizeof("argv") - 1, &global_argv);
+
+    ZVAL_LONG(&global_argc, argc);
+    zend_hash_str_update(&EG(symbol_table), "argc", sizeof("argc") - 1, &global_argc);
 }
 "#,
     )
