@@ -97,7 +97,7 @@ impl ResponseLifecycle {
     }
 }
 
-pub(crate) struct BufferedResponseSink {
+pub struct BufferedResponseSink {
     output: Vec<u8>,
     finalized_output: Vec<u8>,
     finished: bool,
@@ -105,7 +105,7 @@ pub(crate) struct BufferedResponseSink {
 }
 
 impl BufferedResponseSink {
-    pub(crate) fn with_capacity(capacity: usize) -> Self {
+    pub fn with_capacity(capacity: usize) -> Self {
         Self {
             output: Vec::with_capacity(capacity),
             finalized_output: Vec::new(),
@@ -114,20 +114,24 @@ impl BufferedResponseSink {
         }
     }
 
-    pub(crate) fn capacity(&self) -> usize {
+    pub fn capacity(&self) -> usize {
         self.output.capacity()
     }
 
-    pub(crate) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.output.len()
     }
 
-    pub(crate) fn reserve(&mut self, additional: usize) {
+    pub fn is_empty(&self) -> bool {
+        self.output.is_empty()
+    }
+
+    pub fn reserve(&mut self, additional: usize) {
         self.output
             .reserve(additional);
     }
 
-    pub(crate) fn take_output(&mut self) -> Vec<u8> {
+    pub fn take_output(&mut self) -> Vec<u8> {
         if self.finished {
             std::mem::take(&mut self.finalized_output)
         } else {
@@ -136,7 +140,7 @@ impl BufferedResponseSink {
     }
 }
 
-pub(crate) struct StreamingResponseSink<F>
+pub struct StreamingResponseSink<F>
 where
     F: FnMut(&[u8]),
 {
@@ -149,7 +153,7 @@ impl<F> StreamingResponseSink<F>
 where
     F: FnMut(&[u8]),
 {
-    pub(crate) fn new(output: F) -> Self {
+    pub fn new(output: F) -> Self {
         Self {
             output,
             finished: false,

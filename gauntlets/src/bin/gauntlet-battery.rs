@@ -21,12 +21,11 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     for case in &run.report.cases {
         println!(
-            "gauntlet-battery: case={} group={} required={} passed={} skipped={} blocking_failure={} artifact={}",
+            "gauntlet-battery: case={} status={} group={} required={} blocking_failure={} artifact={}",
             case.name,
+            case_status(case),
             case.group,
             case.required,
-            case.passed,
-            case.skipped,
             case.blocking_failure,
             case.artifact_path.display()
         );
@@ -41,4 +40,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     Ok(())
+}
+
+fn case_status(case: &ripht_sapi_gauntlet::BatteryCaseReport) -> &'static str {
+    if case.skipped {
+        "skipped"
+    } else if case.passed {
+        "pass"
+    } else {
+        "fail"
+    }
 }

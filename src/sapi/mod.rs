@@ -34,6 +34,7 @@ pub(crate) mod server_vars;
 
 pub use config::SapiConfig;
 pub use executor::{ExecutionError, Executor};
+pub use response::{BufferedResponseSink, StreamingResponseSink};
 pub(crate) use server_vars::{ServerVars, ServerVarsCString};
 
 use crate::execution::{

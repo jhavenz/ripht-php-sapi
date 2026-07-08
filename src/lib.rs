@@ -38,8 +38,8 @@ pub use adapters::{
 };
 
 pub use sapi::{
-    finish_current_request, native, ExecutionError, Executor, RiphtSapi,
-    SapiConfig, SapiError,
+    finish_current_request, native, BufferedResponseSink, ExecutionError,
+    Executor, RiphtSapi, SapiConfig, SapiError, StreamingResponseSink,
 };
 
 pub use execution::{
@@ -51,13 +51,13 @@ pub use execution::{
 
 pub mod prelude {
     pub use crate::{
-        finish_current_request, AbortReason, AdapterError, CliRequest,
-        CliRequestError, ExecutionContext, ExecutionControl, ExecutionHooks,
-        ExecutionMessage, ExecutionOptions, ExecutionReport, ExecutionResult,
-        Executor, Method, NoOpHooks, OutputAction, PhpSapiAdapter,
-        ResponseHeader, ResponseSink, RiphtSapi, SapiConfig, SapiError,
-        SinkResult, StreamingCallback, SyslogLevel, WebRequest,
-        WebRequestError,
+        finish_current_request, AbortReason, AdapterError,
+        BufferedResponseSink, CliRequest, CliRequestError, ExecutionContext,
+        ExecutionControl, ExecutionHooks, ExecutionMessage, ExecutionOptions,
+        ExecutionReport, ExecutionResult, Executor, Method, NoOpHooks,
+        OutputAction, PhpSapiAdapter, ResponseHeader, ResponseSink, RiphtSapi,
+        SapiConfig, SapiError, SinkResult, StreamingCallback,
+        StreamingResponseSink, SyslogLevel, WebRequest, WebRequestError,
     };
 
     #[cfg(feature = "http")]

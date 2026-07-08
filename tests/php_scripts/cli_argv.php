@@ -16,5 +16,4 @@ echo json_encode([
     'global_argc_type' => gettype($globalArgc),
     'global_argv' => $globalArgv,
     'global_argc' => $globalArgc,
-    'stdin' => file_get_contents('php://stdin'),
 ], JSON_PRETTY_PRINT);
